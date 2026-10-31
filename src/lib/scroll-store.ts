@@ -20,6 +20,10 @@ export const scrollStore = {
     crossing: 0,
     speed: 0,
     charge: 0,
+    // 0..1 while one project hands over to the next: the hyperspace jet speeds up
+    warp: 0,
+    // 0..1 peaking as the camera flies through a section portal
+    portal: 0,
     hole: { x: 0, y: 0, r: 0 },
     planets: [0, 1, 2, 3].map(() => ({ x: 0, y: 0, o: 0, active: 0 })),
   },
@@ -27,6 +31,9 @@ export const scrollStore = {
   orbit: { on: 0, p: 0 },
   lenis: null as Lenis | null,
 };
+
+/** Where the black hole sits on screen (NDC) in the projects chapter; the project cards come out of it. */
+export const JET_POINT = { x: 0.82, y: 0.58 };
 
 /** Where the black hole sits on screen (NDC) at the bottom of the hero dive. */
 export const DIVE_POINT = { x: 0, y: 0.1 };

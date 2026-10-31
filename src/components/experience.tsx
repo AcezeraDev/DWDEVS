@@ -7,7 +7,7 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
 import SplitType from "split-type";
 import { SmoothScroll } from "@/components/providers/smooth-scroll";
-import { ChapterRail, Cursor, Curtain, HorizonFx, Interactions, Preloader } from "@/components/ui-kit";
+import { ChapterRail, Cursor, Curtain, HorizonFx, Interactions, Preloader, Stardust } from "@/components/ui-kit";
 import { About, Band, Hero, Nav, Services, Summary } from "@/components/sections/intro-sections";
 import { Contact, Footer, Process, Projects, Stack } from "@/components/sections/work-sections";
 import { prefersReducedMotion, scrollStore } from "@/lib/scroll-store";
@@ -144,6 +144,7 @@ export function Experience() {
       <BackgroundScene />
       <HorizonFx />
       <div className="grain" aria-hidden />
+      <Stardust />
       <Cursor />
       <Interactions />
       <Nav />

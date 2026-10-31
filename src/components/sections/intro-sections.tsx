@@ -5,7 +5,9 @@ import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
 import SplitType from "split-type";
+import { BorderBeam } from "@/components/ui/border-beam";
 import { Marquee } from "@/components/ui/marquee";
+import { Meteors } from "@/components/ui/meteors";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { Logo, Magnetic, RollText, SectionLabel } from "@/components/ui-kit";
 import { DIVE_POINT, cinematicTo, offsetIn, prefersReducedMotion, scrollStore, scrollToTarget } from "@/lib/scroll-store";
@@ -129,35 +131,64 @@ export function Hero() {
           .set(".hero-line .char", { transition: "none" }, 0)
           // Anticipation: the whole block leans and stretches toward the hole before letting go
           .to(".hero-inner", { scaleX: 1.04, skewX: -5, x: 24, y: -10, transformOrigin: "60% 30%", duration: 0.2, ease: "sine.in" }, 0);
+        // Shadows/filters keep the same shape at every step so GSAP can blend them
+        const COLD = "0 0 0px rgba(200,240,49,0), 0px 0 0 rgba(255,70,90,0), 0px 0 0 rgba(70,210,255,0)";
+        const WARM = "0 0 14px rgba(200,240,49,0.7), -2px 0 0 rgba(255,70,90,0.35), 2px 0 0 rgba(70,210,255,0.35)";
+        const HOT = "0 0 28px rgba(220,255,120,1), -5px 0 0 rgba(255,70,90,0.6), 5px 0 0 rgba(70,210,255,0.6)";
+        const angle = (el: HTMLElement) => (Math.atan2(pull(el).y, pull(el).x) * 180) / Math.PI;
+        tl.set(order, { filter: "blur(0px) brightness(1)" }, 0).set(".hero-line .char", { textShadow: COLD }, 0);
+
         order.forEach((el, i) => {
-          const at = 0.1 + (i / order.length) * 0.48;
-          const spin = 260 + (i % 5) * 70;
-          // Sideways kick, perpendicular to the pull (clockwise, like the disk)
+          const at = 0.1 + (i / order.length) * 0.46;
+          const isChar = el.classList.contains("char");
+          // 1. Tug: flung sideways along the disk's spin, starting to heat up
           tl.to(
             el,
             {
-              x: () => pull(el).x * 0.3 - pull(el).y * 0.22,
-              y: () => pull(el).y * 0.3 + pull(el).x * 0.22,
-              rotation: spin * 0.35,
-              scaleX: 1.35,
-              scaleY: 0.75,
-              duration: 0.22,
+              x: () => pull(el).x * 0.22 - pull(el).y * 0.2,
+              y: () => pull(el).y * 0.22 + pull(el).x * 0.2,
+              rotation: () => angle(el) * 0.35 + (i % 2 ? 18 : -18),
+              scaleX: 1.25,
+              scaleY: 0.85,
+              filter: "blur(0px) brightness(1.25)",
+              ...(isChar && { textShadow: WARM }),
+              duration: 0.18,
               ease: "sine.in",
             },
             at
-          ).to(
-            el,
-            {
-              x: () => pull(el).x,
-              y: () => pull(el).y,
-              rotation: spin,
-              scale: 0.04,
-              opacity: 0,
-              duration: 0.24,
-              ease: "power3.in",
-            },
-            at + 0.22
-          );
+          )
+            // 2. Spaghettification: lines up with the hole and stretches into a glowing strand
+            .to(
+              el,
+              {
+                x: () => pull(el).x * 0.72,
+                y: () => pull(el).y * 0.72,
+                rotation: () => angle(el),
+                scaleX: 2.8,
+                scaleY: 0.32,
+                filter: "blur(1.5px) brightness(1.7)",
+                ...(isChar && { textShadow: HOT, color: "#eaffb5" }),
+                duration: 0.15,
+                ease: "power2.in",
+              },
+              at + 0.18
+            )
+            // 3. Swallowed: a white-hot sliver that vanishes into the shadow
+            .to(
+              el,
+              {
+                x: () => pull(el).x,
+                y: () => pull(el).y,
+                rotation: () => angle(el) + 30,
+                scaleX: 5,
+                scaleY: 0.04,
+                opacity: 0,
+                filter: "blur(5px) brightness(2.4)",
+                duration: 0.13,
+                ease: "power3.in",
+              },
+              at + 0.33
+            );
         });
         tl.to({}, { duration: 0.12 });
       });
@@ -390,6 +421,7 @@ export function About() {
         <div className="founders glide mt-20 grid gap-5 [perspective:1200px] md:grid-cols-2">
           {FOUNDERS.map((f) => (
             <article key={f.initial} data-tilt="5" className="founder glass spot group relative overflow-hidden rounded-3xl p-7 md:p-9">
+              <BorderBeam size={240} duration={11} colorFrom="#c8f031" colorTo="#1fd1ba" delay={f.initial === "W" ? 5.5 : 0} />
               <div className="flex items-start justify-between">
                 <span className="font-display text-[7rem] font-extrabold leading-[0.8] text-lime transition-all duration-700 [-webkit-text-stroke:2px_transparent] group-hover:-translate-y-1 group-hover:rotate-[-4deg] group-hover:text-transparent group-hover:[-webkit-text-stroke:2px_#c8f031] md:text-[9rem]">
                   {f.initial}
@@ -417,8 +449,9 @@ export function About() {
             { v: 2, suffix: "", label: "devs dedicados" },
             { v: 100, suffix: "%", label: "código sob medida" },
             { v: 0, suffix: "", label: "templates prontos" },
-          ].map((s) => (
-            <div key={s.label} data-tilt="6" className="glass spot rounded-3xl p-6">
+          ].map((s, i) => (
+            <div key={s.label} data-tilt="6" className="glass spot relative overflow-hidden rounded-3xl p-6">
+              <BorderBeam size={110} duration={9} delay={i * 2.2} colorFrom="#c8f031" colorTo="#1fd1ba" />
               <dt className="label text-muted">{s.label}</dt>
               <dd className="mt-4 whitespace-nowrap font-display text-5xl font-extrabold text-paper md:text-6xl">
                 <NumberTicker value={s.v} className="text-paper dark:text-paper" />
@@ -639,7 +672,8 @@ function ServiceOrbit() {
           </div>
         </div>
 
-        <div className="glass mt-6 grid rounded-[2rem] p-8">
+        <div className="glass relative mt-6 grid overflow-hidden rounded-[2rem] p-8">
+          <BorderBeam size={280} duration={12} colorFrom="#c8f031" colorTo="#1fd1ba" />
           {SERVICES.map((x, i) => (
             <article
               key={x.n}
@@ -704,6 +738,9 @@ const SUMMARY = [
 export function Summary() {
   return (
     <section aria-labelledby="resumo" className="relative px-4 py-24 md:px-10 md:py-32">
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+        <Meteors number={14} minDuration={4} maxDuration={11} />
+      </div>
       <div className="mx-auto max-w-[1400px]">
         <h2
           id="resumo"
@@ -721,6 +758,7 @@ export function Summary() {
                 (i === 1 ? "spot-dark bg-lime text-ink" : "glass text-paper")
               }
             >
+              {i !== 1 && <BorderBeam size={200} duration={10} delay={i * 3} colorFrom="#c8f031" colorTo="#1fd1ba" />}
               <span className={"label " + (i === 1 ? "text-ink/60" : "text-lime")}>0{i + 1}</span>
               <h3 className="mt-6 font-display text-3xl font-bold uppercase leading-none tracking-tight md:text-4xl">
                 {s.q}

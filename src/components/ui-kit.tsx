@@ -442,3 +442,106 @@ export function HorizonFx() {
     </div>
   );
 }
+
+type Dust = { x: number; y: number; vx: number; vy: number; life: number; max: number; r: number; c: string };
+type Rift = { x: number; y: number; t: number };
+const DUST_COLORS = ["200,240,49", "31,209,186", "245,242,230"];
+
+/**
+ * Stardust: the cursor sheds glowing motes that drift and fade, and every click opens a small
+ * portal (a ring that blooms and collapses, throwing sparks). Desktop mouse only.
+ */
+export function Stardust() {
+  const canvas = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (prefersReducedMotion() || !window.matchMedia("(pointer: fine)").matches) return;
+    const cv = canvas.current!;
+    const ctx = cv.getContext("2d");
+    if (!ctx) return;
+    const dpr = Math.min(window.devicePixelRatio, 2);
+    const dust: Dust[] = [];
+    const rifts: Rift[] = [];
+    let last = { x: -1, y: -1 };
+
+    const resize = () => {
+      cv.width = window.innerWidth * dpr;
+      cv.height = window.innerHeight * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    const spawn = (x: number, y: number, speed: number, n: number, life = 0.9) => {
+      for (let i = 0; i < n && dust.length < 220; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const v = Math.random() * speed;
+        dust.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 6, life, max: life, r: 0.6 + Math.random() * 1.6, c: DUST_COLORS[(Math.random() * 3) | 0] });
+      }
+    };
+    const move = (e: PointerEvent) => {
+      if (e.pointerType !== "mouse") return;
+      const moved = last.x < 0 ? 0 : Math.hypot(e.clientX - last.x, e.clientY - last.y);
+      last = { x: e.clientX, y: e.clientY };
+      spawn(e.clientX, e.clientY, 18, Math.min(3, 1 + (moved / 18) | 0));
+    };
+    const click = (e: MouseEvent) => {
+      rifts.push({ x: e.clientX, y: e.clientY, t: 0 });
+      spawn(e.clientX, e.clientY, 160, 26, 0.8);
+    };
+    const tick = (_: number, deltaMs: number) => {
+      const dt = Math.min(deltaMs / 1000, 0.05);
+      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      ctx.globalCompositeOperation = "lighter";
+      for (let i = dust.length - 1; i >= 0; i--) {
+        const d = dust[i];
+        d.life -= dt;
+        if (d.life <= 0) {
+          dust.splice(i, 1);
+          continue;
+        }
+        d.vx *= 0.96;
+        d.vy *= 0.96;
+        d.x += d.vx * dt;
+        d.y += d.vy * dt;
+        const k = d.life / d.max;
+        ctx.fillStyle = `rgba(${d.c},${k * 0.85})`;
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, d.r * (0.5 + k), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      for (let i = rifts.length - 1; i >= 0; i--) {
+        const r = rifts[i];
+        r.t += dt / 0.7;
+        if (r.t >= 1) {
+          rifts.splice(i, 1);
+          continue;
+        }
+        // Opens fast, then collapses back into a point
+        const open = Math.sin(Math.PI * Math.min(r.t * 1.4, 1));
+        const radius = 8 + 46 * Math.sqrt(r.t);
+        const g = ctx.createRadialGradient(r.x, r.y, radius * 0.2, r.x, r.y, radius);
+        g.addColorStop(0, "rgba(7,8,10,0)");
+        g.addColorStop(0.75, `rgba(31,209,186,${0.25 * open})`);
+        g.addColorStop(0.92, `rgba(200,240,49,${0.9 * open})`);
+        g.addColorStop(1, "rgba(200,240,49,0)");
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(r.x, r.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalCompositeOperation = "source-over";
+    };
+
+    resize();
+    window.addEventListener("resize", resize);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("click", click);
+    gsap.ticker.add(tick);
+    return () => {
+      window.removeEventListener("resize", resize);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("click", click);
+      gsap.ticker.remove(tick);
+    };
+  }, []);
+
+  return <canvas ref={canvas} aria-hidden className="pointer-events-none fixed inset-0 z-[66] h-full w-full" />;
+}

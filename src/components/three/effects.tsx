@@ -28,14 +28,14 @@ export function Effects() {
   const fx = useMemo(() => {
     const composer = new EffectComposer(gl);
     composer.addPass(new RenderPass(scene, camera));
-    const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.5, 0.4, 0.55);
+    const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.25, 0.35, 0.8);
     composer.addPass(bloom);
     const lens = new ShaderPass(
       new THREE.ShaderMaterial({
         uniforms: {
           tDiffuse: { value: null },
           uCenter: { value: new THREE.Vector2(0.5, 0.5) },
-          uAberr: { value: 0.012 },
+          uAberr: { value: 0 },
           uZoom: { value: 0 },
         },
         vertexShader: lensVertex,
@@ -63,12 +63,13 @@ export function Effects() {
     if (fx.composer.renderer.getPixelRatio() !== ratio) fx.composer.setPixelRatio(ratio);
     const { charge, speed, crossing, hole } = scrollStore.fx;
     const dive = scrollStore.dive * (1 - scrollStore.legs[1]);
-    fx.bloom.strength = (small ? 0.4 : 0.5) + charge * 0.3 + crossing * 0.9 + dive * 0.25 + speed * 0.2;
-    fx.bloom.radius = 0.4 + charge * 0.15;
+    fx.bloom.strength = (small ? 0.2 : 0.25) + charge * 0.25 + crossing * 0.4 + speed * 0.1 - dive * 0.15;
+    fx.bloom.radius = 0.35 + charge * 0.15;
     const u = fx.lens.uniforms;
     u.uCenter.value.set(hole.x / size.width, 1 - hole.y / size.height);
     u.uZoom.value = THREE.MathUtils.damp(u.uZoom.value, charge * 0.1 + dive * 0.1 + speed * 0.05, 8, delta);
-    u.uAberr.value = 0.01 + charge * 0.02 + speed * 0.012;
+    // No fringes at rest (they make every particle look doubled); they only open up while it pulls
+    u.uAberr.value = charge * 0.012 + speed * 0.003;
     fx.composer.render(delta);
   }, 1);
 

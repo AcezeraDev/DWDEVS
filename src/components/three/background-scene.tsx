@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { AdaptiveDpr } from "@react-three/drei";
 import * as THREE from "three";
-import { DIVE_POINT, scrollStore } from "@/lib/scroll-store";
+import { DIVE_POINT, JET_POINT, scrollStore } from "@/lib/scroll-store";
 import { Effects } from "./effects";
 import {
   bgFragment,
@@ -15,6 +15,7 @@ import {
   journeyVertex,
   planetFragment,
   planetVertex,
+  portalFragment,
 } from "./shaders";
 
 /** One colour per service planet, in the order of the Services section. */
@@ -47,16 +48,16 @@ const CHAPTER_HOLE: HoleKey[] = [
   { x: 0.56, y: 0.06, s: 1.6, tilt: 0.24, roll: -0.18, o: 1 }, // hero: the centerpiece, right of the copy
   { x: 0.74, y: -0.22, s: 1.15, tilt: 1.05, roll: 0.35, o: 0.95 }, // galaxy: about / summary
   { x: 0.84, y: -0.36, s: 0.95, tilt: 0.55, roll: 0.5, o: 0.85 }, // gyroscope: services / stack
-  { x: 0.88, y: 0.64, s: 0.6, tilt: 0.25, roll: -0.15, o: 0.85 }, // hyperspace: projects / process
-  { x: 0, y: -0.3, s: 2, tilt: 0.1, roll: 0, o: 0.95 }, // halo: contact
+  { x: JET_POINT.x, y: JET_POINT.y, s: 0.78, tilt: 0.35, roll: -0.15, o: 0.9 }, // hyperspace: projects / process
+  { x: 0, y: -0.3, s: 2, tilt: 0.27, roll: -0.06, o: 0.9 }, // halo: contact (disk opened into a ring)
 ];
 /** Particle brightness and how hard they clear out of the text column, per chapter. */
 const CHAPTER_LOOK = [
   { o: 0.85, clear: 0 },
   { o: 0.8, clear: 0.9 },
   { o: 0.42, clear: 0.9 },
-  { o: 0.45, clear: 0.35 },
-  { o: 0.6, clear: 0 },
+  { o: 0.36, clear: 0.35 },
+  { o: 0.42, clear: 0 },
 ];
 
 const isBig = (h: HoleKey | null) => !!h && h.s > 2;
@@ -109,7 +110,7 @@ function buildShapes(n: number) {
 
     // Halo: (angle, radius, height)
     halo[k] = Math.random() * Math.PI * 2;
-    halo[k + 1] = 3 + Math.pow(Math.random(), 1.6) * 6.5;
+    halo[k + 1] = 3 + Math.pow(Math.random(), 1.2) * 2;
     halo[k + 2] = gauss() * 0.12;
   }
   return { stars, galaxy, gyro, jet, halo, rand };
@@ -161,6 +162,69 @@ function Background() {
   );
 }
 
+/** Portal colours per chapter it leads into (2: services, 3: projects): rim, then flames. */
+const PORTALS: Record<number, [string, string]> = { 2: ["#1fd1ba", "#8a5cff"], 3: ["#c8f031", "#1fd1ba"] };
+
+/**
+ * A portal opens in the middle of the screen while chapter 2 or 3 scrolls in, then grows until
+ * the camera flies through it. Everything follows the scroll (scrollStore.legs).
+ */
+function Portal() {
+  const mat = useRef<THREE.ShaderMaterial>(null);
+  const mesh = useRef<THREE.Mesh>(null);
+  const size = useThree((s) => s.size);
+  const uniforms = useMemo(
+    () => ({
+      uTime: { value: 0 },
+      uOpen: { value: 0 },
+      uRadius: { value: 0 },
+      uAspect: { value: 1 },
+      uTint: { value: new THREE.Color(PORTALS[2][0]) },
+      uTint2: { value: new THREE.Color(PORTALS[2][1]) },
+    }),
+    []
+  );
+  const shown = useRef(2);
+
+  useFrame((_, delta) => {
+    const m = mat.current;
+    if (!m) return;
+    const legs = scrollStore.legs;
+    // Whichever portal chapter is mid-transition (their zones never overlap)
+    const n = legs[3] > 0 && legs[3] < 1 ? 3 : 2;
+    const L = legs[n];
+    if (n !== shown.current) {
+      shown.current = n;
+      m.uniforms.uTint.value.set(PORTALS[n][0]);
+      m.uniforms.uTint2.value.set(PORTALS[n][1]);
+    }
+    const open = smooth(clamp01(L / 0.15)) * (1 - smooth(clamp01((L - 0.72) / 0.28)));
+    const grow = smooth(clamp01((L - 0.3) / 0.7));
+    m.uniforms.uTime.value += Math.min(delta, 0.05);
+    m.uniforms.uOpen.value = THREE.MathUtils.damp(m.uniforms.uOpen.value, open, 10, delta);
+    m.uniforms.uRadius.value = 0.3 * smooth(clamp01(L / 0.3)) + grow * grow * 2.4;
+    m.uniforms.uAspect.value = size.width / size.height;
+    scrollStore.fx.portal = Math.exp(-Math.pow((L - 0.62) / 0.14, 2)) * (L > 0 && L < 1 ? 1 : 0);
+    if (mesh.current) mesh.current.visible = m.uniforms.uOpen.value > 0.002;
+  });
+
+  return (
+    <mesh ref={mesh} frustumCulled={false} renderOrder={2}>
+      <planeGeometry args={[2, 2]} />
+      <shaderMaterial
+        ref={mat}
+        vertexShader={bgVertex}
+        fragmentShader={portalFragment}
+        uniforms={uniforms}
+        transparent
+        depthWrite={false}
+        depthTest={false}
+        blending={THREE.AdditiveBlending}
+      />
+    </mesh>
+  );
+}
+
 /** The particle field, the black hole and the camera, all driven by the chapter on screen. */
 function Journey() {
   const mat = useRef<THREE.ShaderMaterial>(null);
@@ -190,6 +254,7 @@ function Journey() {
   const hovering = useRef(false);
   const hoverW = useRef(0);
   const orbitW = useRef(0);
+  const warp = useRef(0);
   const planets = useRef<(THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial> | null)[]>([]);
   const diskQ = useMemo(() => new THREE.Quaternion(), []);
   const tmp = useMemo(() => new THREE.Vector3(), []);
@@ -323,7 +388,7 @@ function Journey() {
     // Vertigo while falling in, plus a small kick of speed when scrolling fast
     const persp = cam as THREE.PerspectiveCamera;
     // Vertigo while falling in, a kick of speed on fast scrolls, a squeeze while charging
-    const fov = 45 + 28 * smooth(dv) * (1 - crossing * 0.4) + hunger.current * 7 - ch * 6;
+    const fov = 45 + 28 * smooth(dv) * (1 - crossing * 0.4) + hunger.current * 7 - ch * 6 + scrollStore.fx.portal * 9;
     if (Math.abs(persp.fov - fov) > 0.01) {
       persp.fov = fov;
       persp.updateProjectionMatrix();
@@ -335,8 +400,9 @@ function Journey() {
     pulse.current = THREE.MathUtils.damp(pulse.current, 0, 2.2, dt);
     const speed = Math.min(Math.abs(scrollStore.velocity) / 30, 1);
     hunger.current = THREE.MathUtils.damp(hunger.current, speed, speed > hunger.current ? 4 : 1.2, dt);
-    // Hyperspace runs faster the faster you scroll
-    flow.current += dt * (0.12 + hunger.current * 0.9);
+    // Hyperspace runs faster the faster you scroll, and jumps to warp while projects hand over
+    warp.current = THREE.MathUtils.damp(warp.current, scrollStore.fx.warp, 6, dt);
+    flow.current += dt * (0.12 + hunger.current * 0.9 + warp.current * 1.6);
 
     u.uTime.value += dt;
     u.uMorph.value = c;
@@ -344,13 +410,13 @@ function Journey() {
     u.uDive.value = dv;
     u.uPulse.value = Math.max(pulse.current, wave.current * 0.35);
     u.uFlow.value = flow.current;
-    u.uSize.value = 40 * state.viewport.dpr * (narrow ? 0.8 : 1) * (1 + hunger.current * 0.6);
+    u.uSize.value = 40 * state.viewport.dpr * (narrow ? 0.8 : 1) * (1 + hunger.current * 0.6 + warp.current * 0.4);
     u.uAspect.value = size.width / size.height;
     u.uScale.value = narrow ? 0.6 : 1;
     // The orbit ring sits right of the copy panel, so let it through while the orbit is up
     u.uClear.value = narrow ? 0 : lookNow.clear * (1 - ow * 0.75);
     u.uCharge.value = ch;
-    u.uOpacity.value = THREE.MathUtils.damp(u.uOpacity.value, lookNow.o * (narrow && target > 0 ? 0.55 : 1), 4, dt);
+    u.uOpacity.value = THREE.MathUtils.damp(u.uOpacity.value, lookNow.o * (narrow && target > 0 ? 0.55 : 1) * (1 - ow * 0.35), 4, dt);
     u.uCamPos.value.copy(cam.position);
     mouse.set(state.pointer.x, state.pointer.y);
     u.uMouse.value.lerp(mouse, 1 - Math.exp(-dt * 10));
@@ -359,6 +425,24 @@ function Journey() {
     // middle and blows it up until it swallows the screen, and in the contact chapter it sits
     // right behind the round button. Scrolling fast makes it hungry, a click feeds it.
     sampleChapter(CHAPTER_HOLE, c, holeTarget);
+    // The journey between chapters is a swoop, not a slide: mid-way it arcs (up, then down on
+    // the next leg), comes closer and turns its disk toward us with a spin. At rest it floats.
+    if (c > 1) {
+      const leg = Math.floor(c);
+      const travel = Math.sin(Math.PI * (c - leg));
+      const dir = leg % 2 ? 1 : -1;
+      holeTarget.x *= 1 - 0.3 * travel;
+      holeTarget.y += 0.24 * travel * dir;
+      holeTarget.s *= 1 + 0.3 * travel;
+      holeTarget.tilt += 0.8 * travel;
+      holeTarget.roll += 1.3 * travel * dir;
+    }
+    holeTarget.x += Math.sin(tNow * 0.37) * 0.022;
+    holeTarget.y += Math.sin(tNow * 0.29 + 1.3) * 0.028;
+    holeTarget.roll += Math.sin(tNow * 0.21) * 0.08;
+    // Inertia: a fast scroll leaves it lagging behind and leaning into the motion
+    holeTarget.y += THREE.MathUtils.clamp(scrollStore.velocity * 0.0016, -0.09, 0.09);
+    holeTarget.roll += THREE.MathUtils.clamp(scrollStore.velocity * 0.004, -0.3, 0.3);
     const fovHalf = THREE.MathUtils.degToRad((cam as THREE.PerspectiveCamera).fov / 2);
     const halfH = HOLE_DIST * Math.tan(fovHalf);
     const halfW = halfH * u.uAspect.value;
@@ -440,7 +524,7 @@ function Journey() {
       hu.uAmt.value = amt;
       hu.uTime.value = holeTime.current;
       hu.uRs.value = RS * mass;
-      hu.uGlow.value = 1 + hunger.current * 0.7 + swell * 0.3 + crossing + ch * 0.45 + hoverW.current * 0.3;
+      hu.uGlow.value = 1 + hunger.current * 0.7 + swell * 0.3 + crossing * 0.6 + ch * 0.45 + hoverW.current * 0.3 - ow * 0.3 - smooth(dv) * 0.5;
       hu.uFlash.value = Math.max(pulse.current * pulse.current, crossing);
       basis.m.makeRotationFromQuaternion(basis.q.invert());
       hu.uToLocal.value.setFromMatrix4(basis.m);
@@ -573,6 +657,7 @@ export default function BackgroundScene() {
         <AdaptiveDpr pixelated={false} />
         <Background />
         <Journey />
+        <Portal />
         <Effects />
       </Canvas>
     </div>
