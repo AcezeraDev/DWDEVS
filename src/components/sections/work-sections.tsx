@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import SplitType from "split-type";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
 import { Logo, Magnetic, RollText, SectionLabel } from "@/components/ui-kit";
-import { prefersReducedMotion, scrollToTarget } from "@/lib/scroll-store";
+import { offsetIn, prefersReducedMotion, scrollToTarget } from "@/lib/scroll-store";
 import { LINKEDIN } from "./intro-sections";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
@@ -413,7 +414,7 @@ export function Projects() {
   );
 
   return (
-    <section id="projetos" ref={root} className="relative pt-28 lg:pt-36">
+    <section id="projetos" data-chapter="3" ref={root} className="relative pt-28 lg:pt-36">
       <div className="mx-auto flex max-w-[1400px] flex-wrap items-end justify-between gap-6 px-4 md:px-10">
         <div>
           <SectionLabel index="04">Trabalho real, cliente real</SectionLabel>
@@ -505,11 +506,56 @@ export function Process() {
 }
 
 export function Contact() {
+  const root = useRef<HTMLElement>(null);
+
+  // The black hole parks behind the round button (see the scene) and the headline pours out
+  // of it as the section scrolls in: every letter starts inside the button and flies to its place.
+  useGSAP(
+    () => {
+      const split = new SplitType(".emit-title", { types: "words,chars" });
+      if (!prefersReducedMotion()) {
+        const section = root.current!;
+        const core = section.querySelector<HTMLElement>("#cta-core")!;
+        const chars = gsap.utils.toArray<HTMLElement>(".emit-title .char");
+        const from = (el: HTMLElement) => {
+          const a = offsetIn(core, section);
+          const b = offsetIn(el, section);
+          return { x: a.x - b.x, y: a.y - b.y };
+        };
+        const tl = gsap.timeline({
+          defaults: { ease: "none" },
+          scrollTrigger: { trigger: section, start: "top 80%", end: "top 5%", scrub: 0.8, invalidateOnRefresh: true },
+        });
+        chars
+          .map((el) => ({ el, d: Math.hypot(from(el).x, from(el).y) }))
+          .sort((a, b) => a.d - b.d)
+          .forEach(({ el }, i) => {
+            tl.fromTo(
+              el,
+              {
+                x: () => from(el).x,
+                y: () => from(el).y,
+                rotation: (i % 2 ? 1 : -1) * (180 + (i % 4) * 60),
+                scale: 0.05,
+                opacity: 0,
+              },
+              { x: 0, y: 0, rotation: 0, scale: 1, opacity: 1, duration: 0.5, ease: "power3.out" },
+              (i / chars.length) * 0.5
+            );
+          });
+        tl.set(chars, { transition: "none" }, 0);
+        tl.set(chars, { clearProps: "transform,opacity,transition" });
+      }
+      return () => split.revert();
+    },
+    { scope: root }
+  );
+
   return (
-    <section id="contato" className="relative flex min-h-svh flex-col justify-center px-4 py-28 md:px-10">
+    <section id="contato" data-chapter="4" ref={root} className="relative flex min-h-svh flex-col justify-center px-4 py-28 md:px-10">
       <div className="mx-auto w-full max-w-[1400px] text-center">
         <SectionLabel index="06">Agora é com você</SectionLabel>
-        <h2 className="cine char-hover mx-auto mt-10 max-w-6xl font-display text-[clamp(2.4rem,9vw,10rem)] font-extrabold uppercase leading-[0.88] tracking-[-0.04em]">
+        <h2 className="emit-title char-hover mx-auto mt-10 max-w-6xl font-display text-[clamp(2.4rem,9vw,10rem)] font-extrabold uppercase leading-[0.88] tracking-[-0.04em]">
           Vamos criar o seu site?
         </h2>
         <p className="mx-auto mt-8 max-w-lg text-lg text-paper/70">
@@ -518,6 +564,7 @@ export function Contact() {
         <div className="mt-14 flex flex-col items-center justify-center gap-5 sm:flex-row">
           <Magnetic strength={0.45}>
             <a
+              id="cta-core"
               href={LINKEDIN}
               target="_blank"
               rel="noreferrer"

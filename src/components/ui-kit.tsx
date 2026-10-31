@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { cn } from "@/lib/utils";
-import { prefersReducedMotion, scrollStore } from "@/lib/scroll-store";
+import { DIVE_POINT, cinematicTo, prefersReducedMotion, scrollStore, scrollToTarget } from "@/lib/scroll-store";
 
 export function Logo({ className }: { className?: string }) {
   return (
@@ -19,7 +19,7 @@ export function SectionLabel({ index, children }: { index: string; children: Rea
     <div className="label flex items-center gap-3 text-muted">
       <span className="text-lime">({index})</span>
       <span className="h-px w-10 bg-white/20" />
-      <span>{children}</span>
+      <span className="scramble">{children}</span>
     </div>
   );
 }
@@ -85,22 +85,29 @@ export function Cursor() {
       if (next === mode) return;
       mode = next;
       const big = next === "view" || next === "drag";
+      const ring = next === "hole" ? 86 : big ? 92 : next === "link" ? 56 : next === "blob" ? 70 : 34;
       gsap.to(r, {
-        width: big ? 92 : next === "link" ? 56 : next === "blob" ? 70 : 34,
-        height: big ? 92 : next === "link" ? 56 : next === "blob" ? 70 : 34,
-        backgroundColor: big ? "rgba(200,240,49,1)" : next === "blob" ? "rgba(200,240,49,0.15)" : "rgba(200,240,49,0)",
+        width: ring,
+        height: ring,
+        backgroundColor: big ? "rgba(200,240,49,1)" : next === "blob" || next === "hole" ? "rgba(200,240,49,0.1)" : "rgba(200,240,49,0)",
         duration: 0.35,
         ease: "power3.out",
       });
       gsap.to(d, { scale: next ? 0 : 1, duration: 0.2 });
-      setLabel(next === "view" ? "Ver site" : next === "drag" ? "Arraste" : next === "blob" ? "Clique" : "");
+      setLabel(next === "view" ? "Ver site" : next === "drag" ? "Arraste" : next === "hole" ? "Segure" : "");
     };
 
     const move = (e: MouseEvent) => {
       dx(e.clientX);
       dy(e.clientY);
-      rx(e.clientX);
-      ry(e.clientY);
+      // The ring is pulled toward the black hole when it gets close, like light bending around it
+      const h = scrollStore.fx.hole;
+      const gx = h.x - e.clientX;
+      const gy = h.y - e.clientY;
+      const reach = Math.max(h.r * 3.2, 90);
+      const k = h.r > 0 ? Math.pow(Math.max(0, 1 - Math.hypot(gx, gy) / reach), 2) * 0.45 : 0;
+      rx(e.clientX + gx * k);
+      ry(e.clientY + gy * k);
       const t = (e.target as HTMLElement)?.closest?.("[data-cursor], a, button") as HTMLElement | null;
       const fromScene = document.documentElement.dataset.cursor;
       if (t?.dataset.cursor) setMode(t.dataset.cursor);
@@ -124,7 +131,7 @@ export function Cursor() {
         ref={ring}
         className="pointer-events-none fixed left-0 top-0 z-[70] flex size-[34px] items-center justify-center rounded-full border border-lime/70 opacity-0"
       >
-        <span className="label text-[10px] font-medium text-ink">{label === "Clique" ? "" : label}</span>
+        <span className={"label text-[10px] font-medium " + (label === "Segure" ? "text-lime" : "text-ink")}>{label}</span>
       </div>
     </>
   );
@@ -297,5 +304,141 @@ export function Curtain() {
         </span>
       </div>
     </>
+  );
+}
+
+const CHAPTERS = [
+  { id: "#top", label: "Início" },
+  { id: "#sobre", label: "Sobre" },
+  { id: "#servicos", label: "Serviços" },
+  { id: "#projetos", label: "Projetos" },
+  { id: "#contato", label: "Contato" },
+];
+
+/**
+ * Thin rail on the right edge (wide screens only): how far down the page you are, which chapter
+ * of the journey is on screen, and a jump to any of them.
+ */
+export function ChapterRail() {
+  const fill = useRef<HTMLSpanElement>(null);
+  const [active, setActive] = useState(0);
+
+  useEffect(() => {
+    const onChapter = (e: Event) => setActive((e as CustomEvent<number>).detail);
+    const tick = () => {
+      if (fill.current) fill.current.style.transform = `scaleY(${scrollStore.progress})`;
+    };
+    window.addEventListener("dw:chapter", onChapter);
+    gsap.ticker.add(tick);
+    return () => {
+      window.removeEventListener("dw:chapter", onChapter);
+      gsap.ticker.remove(tick);
+    };
+  }, []);
+
+  return (
+    <nav
+      aria-label="Capítulos da página"
+      className="fixed right-4 top-1/2 z-40 hidden -translate-y-1/2 flex-col items-center gap-5 xl:flex"
+    >
+      <span className="label text-[10px] tabular-nums text-lime">0{active + 1}</span>
+      <div className="relative flex flex-col items-center gap-7 py-1">
+        <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-white/10" />
+        <span ref={fill} className="absolute inset-y-0 left-1/2 w-px origin-top -translate-x-1/2 scale-y-0 bg-lime/70" />
+        {CHAPTERS.map((c, i) => (
+          <a
+            key={c.id}
+            href={c.id}
+            aria-label={c.label}
+            aria-current={i === active ? "step" : undefined}
+            onClick={(e) => {
+              e.preventDefault();
+              if (i === 0) scrollToTarget(0);
+              else cinematicTo(c.id, c.label);
+            }}
+            className="group relative grid size-3 place-items-center"
+          >
+            <span
+              className={
+                "block rounded-full transition-all duration-500 " +
+                (i === active ? "size-3 bg-lime shadow-[0_0_14px_rgba(200,240,49,0.8)]" : "size-1.5 bg-white/35 group-hover:bg-paper")
+              }
+            />
+            <span
+              className={
+                "label pointer-events-none absolute right-6 whitespace-nowrap rounded-full bg-ink/80 px-2.5 py-1 text-[10px] backdrop-blur transition-all duration-500 " +
+                "translate-x-2 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 " + (i === active ? "text-lime" : "text-paper")
+              }
+            >
+              {c.label}
+            </span>
+          </a>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
+/**
+ * Screen-space layer between the 3D scene and the page: the edges close in while you fall into
+ * the black hole (and a little on fast scrolls), a shock ring and a white-lime flash mark the
+ * crossing of the horizon, and a readout counts the fall.
+ */
+export function HorizonFx() {
+  const vignette = useRef<HTMLDivElement>(null);
+  const flash = useRef<HTMLDivElement>(null);
+  const ring = useRef<HTMLDivElement>(null);
+  const hud = useRef<HTMLDivElement>(null);
+  const count = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (prefersReducedMotion()) return;
+    const bump = (x: number, a: number, b: number) => Math.max(0, Math.min((x - a) / (b - a), 1));
+    const tick = () => {
+      const dive = scrollStore.dive * (1 - scrollStore.legs[1]);
+      const { crossing, speed } = scrollStore.fx;
+      if (vignette.current) vignette.current.style.opacity = String(Math.min(1, dive * 0.95 + speed * 0.45));
+      if (flash.current) flash.current.style.opacity = String(crossing * 0.75);
+      if (ring.current) {
+        const t = bump(dive, 0.84, 1);
+        ring.current.style.opacity = String(Math.sin(t * Math.PI) * 0.9);
+        ring.current.style.transform = `translate(-50%, -50%) scale(${0.15 + t * t * 4})`;
+      }
+      if (hud.current) {
+        hud.current.style.opacity = String(Math.min(bump(dive, 0.3, 0.42), 1 - bump(dive, 0.9, 0.98)));
+        if (count.current) count.current.textContent = String(Math.round(dive * 100)).padStart(3, "0");
+      }
+    };
+    gsap.ticker.add(tick);
+    return () => gsap.ticker.remove(tick);
+  }, []);
+
+  const cx = `${(DIVE_POINT.x * 0.5 + 0.5) * 100}%`;
+  const cy = `${(0.5 - DIVE_POINT.y * 0.5) * 100}%`;
+  return (
+    <div aria-hidden className="pointer-events-none fixed inset-0 z-[5] overflow-hidden">
+      <div
+        ref={vignette}
+        className="absolute inset-0 opacity-0"
+        style={{ background: `radial-gradient(ellipse 70% 65% at ${cx} ${cy}, transparent 35%, rgba(3,4,5,0.92) 100%)` }}
+      />
+      <div
+        ref={flash}
+        className="absolute inset-0 opacity-0 mix-blend-screen"
+        style={{ background: `radial-gradient(circle at ${cx} ${cy}, #f6ffd8 0%, rgba(200,240,49,0.85) 18%, rgba(200,240,49,0.15) 55%, transparent 75%)` }}
+      />
+      <div
+        ref={ring}
+        className="absolute size-[60vmax] rounded-full border-2 border-lime opacity-0 shadow-[0_0_80px_rgba(200,240,49,0.6),inset_0_0_80px_rgba(200,240,49,0.4)]"
+        style={{ left: cx, top: cy }}
+      />
+      <div ref={hud} className="label absolute bottom-10 left-1/2 flex -translate-x-1/2 items-center gap-4 whitespace-nowrap text-paper/70 opacity-0">
+        <span className="hidden h-px w-10 bg-lime/60 sm:block" />
+        <span className="sm:hidden">Horizonte de eventos</span>
+        <span className="hidden sm:inline">Atravessando o horizonte de eventos</span>
+        <span ref={count} className="font-display text-base font-bold tabular-nums text-lime">000</span>
+        <span className="hidden h-px w-10 bg-lime/60 sm:block" />
+      </div>
+    </div>
   );
 }
