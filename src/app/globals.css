@@ -1,26 +1,242 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --ink: #07080a;
+  --ink-2: #0d0f12;
+  --ink-3: #14171b;
+  --paper: #f1f0e8;
+  --muted: #8d9088;
+  --lime: #c8f031;
+  --lime-deep: #9cc415;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+
+  --background: var(--ink);
+  --foreground: var(--paper);
+  --radius: 1rem;
 }
 
 @theme inline {
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-paper: var(--paper);
+  --color-muted: var(--muted);
+  --color-lime: var(--lime);
+  --color-lime-deep: var(--lime-deep);
+  --color-line: var(--line);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
+  --font-display: var(--font-syne);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  --animate-marquee: marquee var(--duration) infinite linear;
+  --animate-marquee-vertical: marquee-vertical var(--duration) linear infinite;
+  @keyframes marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(calc(-100% - var(--gap)));
+    }
+  }
+  @keyframes marquee-vertical {
+    from {
+      transform: translateY(0);
+    }
+    to {
+      transform: translateY(calc(-100% - var(--gap)));
+    }
   }
 }
 
+html {
+  background: var(--ink);
+  color-scheme: dark;
+  overflow-x: clip;
+}
+
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+.lenis.lenis-stopped {
+  overflow: clip;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
+}
+
+::selection {
+  background: var(--lime);
+  color: var(--ink);
+}
+
+@media (pointer: fine) {
+  html.has-cursor,
+  html.has-cursor * {
+    cursor: none !important;
+  }
+}
+
+.font-display {
+  font-family: var(--font-syne), sans-serif;
+}
+
+.label {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.text-outline {
+  color: transparent;
+  -webkit-text-stroke: 1.5px var(--lime);
+}
+
+/* Glass surface (awwwards-motion) */
+.glass {
+  background: linear-gradient(160deg, rgba(22, 26, 30, 0.94), rgba(10, 12, 14, 0.92));
+  backdrop-filter: blur(28px) saturate(140%);
+  -webkit-backdrop-filter: blur(28px) saturate(140%);
+  border: 1px solid var(--line);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 24px 80px rgba(0, 0, 0, 0.35);
+}
+
+/* Film grain */
+.grain {
+  pointer-events: none;
+  position: fixed;
+  inset: -50%;
+  z-index: 60;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation: grain 1.2s steps(6) infinite;
+}
+
+@keyframes grain {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-3%, 2%); }
+  40% { transform: translate(2%, -3%); }
+  60% { transform: translate(-2%, -1%); }
+  80% { transform: translate(3%, 3%); }
+  100% { transform: translate(0, 0); }
+}
+
+/* Spotlight + glowing border that follow the cursor (driven by <Interactions />) */
+.spot {
+  position: relative;
+  --spot: rgba(200, 240, 49, 0.13);
+  --spot-edge: rgba(200, 240, 49, 0.85);
+}
+.spot::before,
+.spot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.45s ease;
+  z-index: 1;
+}
+.spot::before {
+  background: radial-gradient(460px circle at var(--mx, 50%) var(--my, 50%), var(--spot), transparent 45%);
+}
+.spot::after {
+  padding: 1px;
+  background: radial-gradient(280px circle at var(--mx, 50%) var(--my, 50%), var(--spot-edge), transparent 60%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+.spot:hover::before,
+.spot:hover::after {
+  opacity: 1;
+}
+.spot-dark {
+  --spot: rgba(7, 8, 10, 0.12);
+  --spot-edge: rgba(7, 8, 10, 0.7);
+}
+
+/* Rolling label: the text slides up and a copy rolls in from below */
+.roll {
+  position: relative;
+  display: inline-flex;
+  overflow: hidden;
+  line-height: 1.25;
+}
+.roll > span {
+  display: inline-block;
+  transition: transform 0.6s cubic-bezier(0.7, 0, 0.2, 1);
+}
+.roll > span::after {
+  content: attr(data-text);
+  position: absolute;
+  left: 0;
+  top: 100%;
+}
+a:hover .roll > span,
+button:hover .roll > span {
+  transform: translateY(-100%);
+}
+
+/* Split words never break mid-word */
+.char-hover .word {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+/* Letters that jump when hovered */
+.char-hover .char {
+  display: inline-block;
+  transition:
+    transform 0.6s cubic-bezier(0.2, 0.9, 0.2, 1),
+    color 0.3s ease;
+}
+.char-hover .char:hover {
+  transform: translateY(-14%) rotate(-7deg) scale(1.08);
+  color: var(--lime);
+  transition-duration: 0.18s;
+}
+.char-hover .text-lime .char:hover,
+.char-hover .text-outline .char:hover {
+  color: var(--paper);
+  -webkit-text-stroke-color: transparent;
+}
+
+/* Skew driven by scroll velocity (set on <html> by SmoothScroll) */
+.skew {
+  transform: skewY(var(--skew, 0deg));
+  transition: transform 0.25s ease-out;
+}
+
+@keyframes scroll-dot {
+  0% { transform: translateY(0); opacity: 0; }
+  30% { opacity: 1; }
+  100% { transform: translateY(18px); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grain,
+  .animate-marquee {
+    animation: none !important;
+  }
 }
