@@ -29,6 +29,9 @@
   --color-lime: var(--lime);
   --color-lime-deep: var(--lime-deep);
   --color-line: var(--line);
+  /* Accent of the /multiverso site: changes with the dimension the visitor picks */
+  --color-acc: var(--acc, #c8f031);
+  --color-acc-2: var(--acc-2, #1fd1ba);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
 
