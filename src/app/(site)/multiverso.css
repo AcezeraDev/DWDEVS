@@ -1,0 +1,144 @@
+/* /multiverso: tokens and effects that only this site uses. The accent pair (--acc, --acc-2)
+   is rewritten on <html> when the visitor jumps to another dimension. */
+:root {
+  --acc: #c8f031;
+  --acc-2: #1fd1ba;
+  --rose: #ff5fa2;
+  --violet: #8a5cff;
+  --echo: 0px;
+}
+
+.mv {
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+.mv ::selection {
+  background: var(--acc);
+  color: var(--ink);
+}
+
+.mv-display {
+  font-family: var(--font-unbounded), var(--font-syne), sans-serif;
+}
+
+.mv-label {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.mv-outline {
+  color: transparent;
+  -webkit-text-stroke: 1.5px var(--paper);
+}
+
+/* Solid panel behind copy: the 3D never runs under text */
+.mv-panel {
+  background: linear-gradient(165deg, rgba(20, 23, 27, 0.96), rgba(9, 10, 12, 0.96));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 30px 90px rgba(0, 0, 0, 0.45);
+}
+
+.mv-glass {
+  background: rgba(13, 15, 18, 0.72);
+  backdrop-filter: blur(28px) saturate(140%);
+  -webkit-backdrop-filter: blur(28px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+
+/* Dimensional echo: two copies of a line, in the accent pair, that drift apart with the scroll
+   speed (--echo is written every frame) and fold back into the line when it stops */
+.mv-echo {
+  position: relative;
+  display: inline-block;
+}
+.mv-echo::before,
+.mv-echo::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: calc(var(--echo-o, 0.75) * var(--echo-a, 0));
+  -webkit-text-stroke: 0;
+}
+.mv-echo::before {
+  color: var(--acc);
+  transform: translate3d(calc(var(--echo) * -1), calc(var(--echo) * 0.3), 0);
+}
+.mv-echo::after {
+  color: var(--rose);
+  transform: translate3d(var(--echo), calc(var(--echo) * -0.3), 0);
+}
+.mv-echo.is-outline::before,
+.mv-echo.is-outline::after {
+  color: transparent;
+}
+.mv-echo.is-outline::before {
+  -webkit-text-stroke: 1.5px var(--acc);
+}
+.mv-echo.is-outline::after {
+  -webkit-text-stroke: 1.5px var(--rose);
+}
+
+@keyframes mv-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* Hover spotlight on cards, fed --mx/--my by the pointer */
+.mv-spot {
+  position: relative;
+}
+.mv-spot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 50%), color-mix(in srgb, var(--acc) 14%, transparent), transparent 45%);
+}
+.mv-spot:hover::after {
+  opacity: 1;
+}
+
+.mv-scroll-x {
+  scrollbar-width: none;
+}
+
+@media (pointer: fine) {
+  html.mv-cursor,
+  html.mv-cursor * {
+    cursor: none !important;
+  }
+}
+
+/* Stack star map: twinkle (--tw is written every frame), hover a star to light it and its name */
+.sky-pt .sky-dot {
+  opacity: var(--tw, 1);
+  transition: r 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), fill 0.3s ease;
+}
+.sky-pt:hover .sky-dot {
+  r: 8px;
+  fill: var(--acc);
+  opacity: 1;
+}
+.sky-pt .sky-label {
+  transition: fill 0.3s ease;
+}
+.sky-pt:hover .sky-label {
+  fill: var(--acc);
+}
+.sky-name {
+  paint-order: stroke;
+  stroke: rgba(9, 10, 12, 0.85);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}

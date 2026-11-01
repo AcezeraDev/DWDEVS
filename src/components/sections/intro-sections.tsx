@@ -1,14 +1,25 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
 import SplitType from "split-type";
+import { BorderBeam } from "@/components/ui/border-beam";
 import { Marquee } from "@/components/ui/marquee";
+import { Meteors } from "@/components/ui/meteors";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { Logo, Magnetic, RollText, SectionLabel } from "@/components/ui-kit";
-import { cinematicTo, prefersReducedMotion, scrollToTarget } from "@/lib/scroll-store";
+import {
+  DIVE_LENGTH,
+  DIVE_POINT,
+  JOURNEY,
+  cinematicTo,
+  offsetIn,
+  prefersReducedMotion,
+  scrollStore,
+  scrollToTarget,
+} from "@/lib/scroll-store";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
@@ -82,32 +93,167 @@ export function Hero() {
     () => {
       const split = new SplitType(".hero-line", { types: "words,chars" });
       gsap.set(".hero-line .word", { whiteSpace: "nowrap" });
-      gsap.set(".hero-line .char", { yPercent: 115, rotate: 8 });
-      gsap.set(".hero-fade", { opacity: 0, y: 24 });
+      // Each letter gets an inner span for the intro, so the intro and the scroll dive below (which
+      // moves the .char itself) never write the same transform or opacity
+      split.chars?.forEach((c) => {
+        const inner = document.createElement("span");
+        inner.className = "ci inline-block";
+        inner.textContent = c.textContent;
+        c.replaceChildren(inner);
+      });
+      gsap.set(".hero-line .ci", { opacity: 0 });
+      gsap.set(".hero-fade", { opacity: 0, yPercent: 30 });
 
+      // Intro: the headline is born out of the black hole. Each letter is flung out of the disk
+      // (closest ones first), curving with its spin, and lands in place.
+      let intro: gsap.core.Timeline | null = null;
       const play = () => {
-        const tl = gsap.timeline();
-        tl.to(".hero-line .char", {
-          yPercent: 0,
-          rotate: 0,
-          duration: 1.1,
-          ease: "expo.out",
-          stagger: 0.025,
-          clearProps: "transform",
-        }).to(".hero-fade", { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", stagger: 0.08 }, "-=0.7");
+        const chars = gsap.utils.toArray<HTMLElement>(".hero-line .ci");
+        const h = scrollStore.fx.hole;
+        const hole = h.r > 0 ? { x: h.x, y: h.y } : { x: window.innerWidth * 0.78, y: window.innerHeight * 0.47 };
+        const from = chars.map((el) => {
+          const r = el.getBoundingClientRect();
+          return { dx: hole.x - (r.left + r.width / 2), dy: hole.y - (r.top + r.height / 2), w: r.width || 1, h: r.height || 1 };
+        });
+        const tl = (intro = gsap.timeline());
+        if (prefersReducedMotion()) {
+          tl.set(chars, { opacity: 1 });
+        } else {
+          chars
+            .map((el, i) => ({ el, f: from[i], d: Math.hypot(from[i].dx, from[i].dy) }))
+            .sort((a, b) => a.d - b.d)
+            .forEach(({ el, f }, k) => {
+              // Halfway out it is still swinging round the hole, along the disk's spin
+              const mx = f.dx * 0.42 - f.dy * 0.32;
+              const my = f.dy * 0.42 + f.dx * 0.32;
+              tl.fromTo(
+                el,
+                { xPercent: (f.dx / f.w) * 100, yPercent: (f.dy / f.h) * 100, rotationY: k % 2 ? 80 : -80, skewY: 12, opacity: 0 },
+                {
+                  keyframes: { xPercent: [(f.dx / f.w) * 100, (mx / f.w) * 100, 0], yPercent: [(f.dy / f.h) * 100, (my / f.h) * 100, 0], easeEach: "sine.out" },
+                  rotationY: 0,
+                  skewY: 0,
+                  duration: 1.6,
+                  ease: "expo.out",
+                },
+                k * 0.022
+              ).to(el, { opacity: 1, duration: 0.35, ease: "power1.out" }, k * 0.022);
+            });
+        }
+        tl.to(".hero-fade", { opacity: 1, yPercent: 0, duration: 0.9, ease: "power3.out", stagger: 0.08 }, 0.7);
       };
       window.addEventListener("dw:ready", play, { once: true });
 
-      // Parallax out as the user scrolls away
-      gsap.to(".hero-inner", {
-        yPercent: -18,
-        opacity: 0.15,
-        ease: "none",
-        scrollTrigger: { trigger: root.current, start: "top top", end: "bottom top", scrub: true },
+      // Event horizon: the hero pins while the black hole drifts to the middle and eats it.
+      // Pieces closest to the hole go first; each one is flung sideways along the disk's spin,
+      // stretched, then sucked in. scrollStore.dive tells the scene to grow the hole and fall in.
+      const mm = gsap.matchMedia();
+      mm.add("(prefers-reduced-motion: no-preference)", () => {
+        const section = root.current!;
+        const pieces = gsap.utils.toArray<HTMLElement>(".hero-line .char, .hero-fade");
+        const hole = () => ({ x: (DIVE_POINT.x * 0.5 + 0.5) * window.innerWidth, y: (0.5 - DIVE_POINT.y * 0.5) * window.innerHeight });
+        // The section is pinned at the top, so its own coordinates are the screen's.
+        const pull = (el: HTMLElement) => {
+          const o = offsetIn(el, section);
+          const h = hole();
+          return { x: h.x - o.x, y: h.y - o.y };
+        };
+        const order = pieces
+          .map((el) => ({ el, d: Math.hypot(pull(el).x, pull(el).y) }))
+          .sort((a, b) => a.d - b.d)
+          .map((p) => p.el);
+
+        const tl = gsap.timeline({
+          defaults: { ease: "none" },
+          scrollTrigger: {
+            trigger: section,
+            start: "top top",
+            end: `+=${DIVE_LENGTH * 100}%`,
+            pin: true,
+            scrub: 0.6,
+            invalidateOnRefresh: true,
+            onUpdate: (self) => {
+              scrollStore.dive = self.progress;
+              // Scrolling in before the intro has landed: land it now, so the fade-ins below
+              // (which share opacity with the dive) are not still running while it swallows them
+              if (intro?.isActive()) intro.progress(1);
+            },
+            onLeaveBack: () => void (scrollStore.dive = 0),
+          },
+        });
+        tl.set(".hero-mask", { overflow: "visible" }, 0)
+          .set(".hero-line .char", { transition: "none" }, 0)
+          // Anticipation: the whole block leans and stretches toward the hole before letting go
+          .to(".hero-inner", { scaleX: 1.04, skewX: -5, x: 24, y: -10, transformOrigin: "60% 30%", duration: 0.2, ease: "sine.in" }, 0);
+        // Shadows/filters keep the same shape at every step so GSAP can blend them
+        const COLD = "0 0 0px rgba(200,240,49,0), 0px 0 0 rgba(255,70,90,0), 0px 0 0 rgba(70,210,255,0)";
+        const WARM = "0 0 14px rgba(200,240,49,0.7), -2px 0 0 rgba(255,70,90,0.35), 2px 0 0 rgba(70,210,255,0.35)";
+        const HOT = "0 0 28px rgba(220,255,120,1), -5px 0 0 rgba(255,70,90,0.6), 5px 0 0 rgba(70,210,255,0.6)";
+        const angle = (el: HTMLElement) => (Math.atan2(pull(el).y, pull(el).x) * 180) / Math.PI;
+        tl.set(order, { filter: "blur(0px) brightness(1)" }, 0).set(".hero-line .char", { textShadow: COLD }, 0);
+
+        order.forEach((el, i) => {
+          const at = 0.1 + (i / order.length) * 0.46;
+          const isChar = el.classList.contains("char");
+          // 1. Tug: flung sideways along the disk's spin, starting to heat up
+          tl.to(
+            el,
+            {
+              x: () => pull(el).x * 0.22 - pull(el).y * 0.2,
+              y: () => pull(el).y * 0.22 + pull(el).x * 0.2,
+              rotation: () => angle(el) * 0.35 + (i % 2 ? 18 : -18),
+              scaleX: 1.25,
+              scaleY: 0.85,
+              // Fully shown when the pull starts, whatever the intro had reached
+              startAt: { opacity: 1 },
+              filter: "blur(0px) brightness(1.25)",
+              ...(isChar && { textShadow: WARM }),
+              duration: 0.18,
+              ease: "sine.in",
+            },
+            at
+          )
+            // 2. Spaghettification: lines up with the hole and stretches into a glowing strand
+            .to(
+              el,
+              {
+                x: () => pull(el).x * 0.72,
+                y: () => pull(el).y * 0.72,
+                rotation: () => angle(el),
+                scaleX: 2.8,
+                scaleY: 0.32,
+                filter: "blur(1.5px) brightness(1.7)",
+                ...(isChar && { textShadow: HOT, color: "#eaffb5" }),
+                duration: 0.15,
+                ease: "power2.in",
+              },
+              at + 0.18
+            )
+            // 3. Swallowed: a white-hot sliver that vanishes into the shadow
+            .to(
+              el,
+              {
+                x: () => pull(el).x,
+                y: () => pull(el).y,
+                rotation: () => angle(el) + 30,
+                scaleX: 5,
+                scaleY: 0.04,
+                opacity: 0,
+                filter: "blur(5px) brightness(2.4)",
+                duration: 0.13,
+                ease: "power3.in",
+              },
+              at + 0.33
+            );
+        });
+        // The headline is gone by JOURNEY.swallowed; the rest of the pin is the fall, the horizon
+        // and the wormhole, drawn by the scene from scrollStore.dive
+        tl.to({}, { duration: tl.duration() / JOURNEY.swallowed - tl.duration() });
       });
 
       return () => {
         window.removeEventListener("dw:ready", play);
+        mm.revert();
         split.revert();
       };
     },
@@ -115,70 +261,154 @@ export function Hero() {
   );
 
   return (
-    <section id="top" ref={root} className="relative flex min-h-svh flex-col justify-end px-4 pb-10 pt-32 md:px-10">
-      <div className="hero-inner mx-auto w-full max-w-[1400px]">
-        <p className="hero-fade label mb-6 flex items-center gap-3 text-muted">
-          <span className="inline-block size-2 animate-pulse rounded-full bg-lime" />
-          Sites escritos linha a linha em Mauá, SP
-        </p>
-
-        <h1 className="char-hover font-display text-[clamp(2.2rem,10vw,10.5rem)] font-extrabold uppercase leading-[0.86] tracking-[-0.04em]">
-          <span className="block overflow-hidden pb-[0.04em]">
-            <span className="hero-line block">Sites que</span>
-          </span>
-          <span className="block overflow-hidden pb-[0.04em]">
-            <span className="hero-line block">ninguém</span>
-          </span>
-          <span className="block overflow-hidden pb-[0.06em]">
-            <span className="hero-line block text-lime">esquece.</span>
-          </span>
-        </h1>
-
-        <div className="mt-10 grid gap-8 md:grid-cols-[1.1fr_1fr] md:items-end">
-          <p className="hero-fade max-w-xl text-lg leading-relaxed text-paper/75 md:text-xl">
-            A <strong className="font-semibold text-paper">DWdevs</strong> cria o site da sua empresa do zero: design,
-            programação e publicação. Você fala direto com os dois desenvolvedores, do primeiro contato até o site no ar.
+    <section
+      id="top"
+      data-chapter="0"
+      ref={root}
+      className="relative flex min-h-svh flex-col px-4 pb-5 pt-24 md:px-10 lg:pt-28"
+    >
+      <div className="hero-inner relative flex w-full flex-1 flex-col">
+        {/* Copy sits in the left ~55%; the right side is left empty for the black hole */}
+        <div className="flex flex-1 flex-col justify-end pt-[24svh] lg:max-w-[56vw] lg:justify-center lg:pt-0">
+          <p className="hero-fade label mb-5 flex items-center gap-3 text-muted">
+            <span className="relative grid size-2 place-items-center">
+              <span className="absolute size-2 animate-ping rounded-full bg-lime/60" />
+              <span className="size-2 rounded-full bg-lime" />
+            </span>
+            Estúdio de sites · Mauá, SP
           </p>
-          <div className="hero-fade flex flex-wrap items-center gap-3 md:justify-end">
-            <Magnetic>
-              <button
-                onClick={() => cinematicTo("#projetos", "Projetos")}
-                className="group flex items-center gap-3 rounded-full bg-lime py-4 pl-7 pr-4 font-semibold text-ink"
-              >
-                <RollText>Ver projetos</RollText>
-                <span className="grid size-8 place-items-center rounded-full bg-ink text-lime transition-transform duration-300 group-hover:rotate-45">
-                  ↗
-                </span>
-              </button>
-            </Magnetic>
-            <Magnetic>
-              <button
-                onClick={() => cinematicTo("#contato", "Contato")}
-                className="glass rounded-full px-7 py-4 font-medium text-paper transition-colors hover:border-lime/60 hover:text-lime"
-              >
-                <RollText>Pedir orçamento</RollText>
-              </button>
-            </Magnetic>
+
+          <h1 className="char-hover font-display text-[clamp(2.2rem,10.2vw,6rem)] font-extrabold uppercase leading-[0.88] tracking-[-0.045em] lg:text-[clamp(3rem,5.8vw,8.5rem)]">
+            <span className="hero-mask block pb-[0.04em]">
+              <span className="hero-line block">Sites que</span>
+            </span>
+            <span className="hero-mask flex items-end gap-[0.35em] pb-[0.04em]">
+              <span className="hero-line block text-transparent [-webkit-text-stroke:1.5px_var(--paper)]">ninguém</span>
+              <span className="hero-fade label mb-[0.55em] hidden text-[11px] font-normal normal-case leading-snug tracking-[0.14em] text-muted xl:block">
+                design
+                <br />
+                código
+                <br />
+                <span className="text-lime">deploy</span>
+              </span>
+            </span>
+            <span className="hero-mask block pb-[0.08em]">
+              <span className="hero-line block text-lime">esquece.</span>
+            </span>
+          </h1>
+
+          <div className="mt-7 flex flex-col gap-6 lg:mt-11 lg:gap-8">
+            <p className="hero-fade max-w-[34rem] text-base leading-relaxed text-paper/75 sm:text-lg md:text-xl">
+              A <strong className="font-semibold text-paper">DWdevs</strong> cria o site da sua empresa do zero: design,
+              programação e publicação. Você fala direto com os dois desenvolvedores, do primeiro contato até o site no ar.
+            </p>
+            <div className="hero-fade flex flex-wrap items-center gap-2 sm:gap-3">
+              <Magnetic>
+                <button
+                  onClick={() => cinematicTo("#projetos", "Projetos")}
+                  className="group flex items-center gap-2 rounded-full bg-lime py-3 pl-5 pr-3 text-[15px] font-semibold text-ink sm:gap-3 sm:py-4 sm:pl-7 sm:pr-4 sm:text-base shadow-[0_18px_60px_-12px_rgba(200,240,49,0.55)]"
+                >
+                  <RollText>Ver projetos</RollText>
+                  <span className="grid size-8 place-items-center rounded-full bg-ink text-lime transition-transform duration-300 group-hover:rotate-45">
+                    ↗
+                  </span>
+                </button>
+              </Magnetic>
+              <Magnetic>
+                <button
+                  onClick={() => cinematicTo("#contato", "Contato")}
+                  className="glass rounded-full px-5 py-3.5 text-[15px] font-medium text-paper transition-colors hover:border-lime/60 hover:text-lime sm:px-7 sm:py-4 sm:text-base"
+                >
+                  <RollText>Pedir orçamento</RollText>
+                </button>
+              </Magnetic>
+            </div>
           </div>
         </div>
 
-        <div className="hero-fade mt-12 flex flex-wrap items-center justify-between gap-4 border-t border-white/10 pt-5">
-          <ul className="flex flex-wrap gap-2">
+        {/* Notes pinned around the black hole (wide screens only) */}
+        <div aria-hidden className="pointer-events-none absolute inset-0 hidden lg:block">
+          <div className="hero-fade absolute left-[60vw] top-[16%] flex items-start gap-3">
+            <span className="label leading-relaxed text-muted">
+              Buraco negro em tempo real
+              <br />
+              <span className="text-paper/60">GLSL · raymarching</span>
+            </span>
+            <svg width="90" height="60" viewBox="0 0 90 60" className="mt-2 text-lime/60" fill="none">
+              <path d="M0 1 H50 L88 58" stroke="currentColor" strokeWidth="1" />
+              <circle cx="88" cy="58" r="2.5" fill="currentColor" />
+            </svg>
+          </div>
+          <div className="hero-fade absolute bottom-[26%] right-0 flex items-end gap-3">
+            <svg width="70" height="50" viewBox="0 0 70 50" className="mb-2 text-lime/60" fill="none">
+              <path d="M2 2 L30 49 H70" stroke="currentColor" strokeWidth="1" />
+              <circle cx="2" cy="2" r="2.5" fill="currentColor" />
+            </svg>
+            <span className="label text-right leading-relaxed text-muted">
+              Segure o clique sobre ele
+              <br />
+              <span className="text-paper/60">solte para liberar a onda</span>
+            </span>
+          </div>
+        </div>
+
+        <div className="hero-fade relative mt-6 flex flex-wrap items-center justify-end sm:justify-between lg:mt-8 gap-x-8 gap-y-4 border-t border-white/10 pt-5">
+          <ul className="hidden flex-wrap gap-2 sm:flex">
             {["Sites institucionais", "Landing pages", "Sites 3D interativos"].map((t) => (
               <li key={t} className="label cursor-default rounded-full border border-white/10 px-3 py-1.5 text-paper/70 transition-colors hover:border-lime hover:bg-lime hover:text-ink">
                 {t}
               </li>
             ))}
           </ul>
-          <div className="label flex items-center gap-4 text-muted">
-            <span className="hidden md:inline">Mova o mouse · clique na galáxia</span>
-            <span className="flex h-9 w-5 justify-center rounded-full border border-white/25 pt-2">
-              <span className="block h-1.5 w-1 rounded-full bg-lime [animation:scroll-dot_1.6s_ease-in-out_infinite]" />
-            </span>
-          </div>
+          <dl className="hidden items-center gap-7 md:flex">
+            {[
+              ["4", "sites no ar"],
+              ["2", "devs, sem repasse"],
+              ["0", "templates"],
+            ].map(([v, l]) => (
+              <div key={l} className="flex items-baseline gap-2">
+                <dt className="sr-only">{l}</dt>
+                <dd className="font-display text-2xl font-extrabold text-paper">{v}</dd>
+                <span aria-hidden className="label text-muted">{l}</span>
+              </div>
+            ))}
+          </dl>
+          <FallBadge />
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * Rotating "scroll to fall in" badge: a click plays the whole trip as one long, smooth scroll,
+ * through the hole and out of the far side, landing on the band below the hero.
+ */
+function FallBadge() {
+  const text = "Role para cair no buraco negro · ";
+  return (
+    <button
+      onClick={() => {
+        const band = document.querySelector<HTMLElement>('[data-chapter="1"]');
+        if (!band) return;
+        if (scrollStore.lenis) scrollStore.lenis.scrollTo(band, { duration: 6.5, easing: (t) => -(Math.cos(Math.PI * t) - 1) / 2 });
+        else scrollToTarget('[data-chapter="1"]');
+      }}
+      aria-label="Rolar e cair no buraco negro"
+      className="group relative grid size-20 shrink-0 place-items-center lg:size-24"
+    >
+      <svg viewBox="0 0 100 100" className="absolute inset-0 animate-[spin_14s_linear_infinite] text-paper/60 transition-colors group-hover:text-lime motion-reduce:animate-none">
+        <defs>
+          <path id="fall-ring" d="M50 50 m-38 0 a38 38 0 1 1 76 0 a38 38 0 1 1 -76 0" />
+        </defs>
+        <text className="fill-current font-mono text-[8.6px] uppercase tracking-[0.18em]">
+          <textPath href="#fall-ring">{text}</textPath>
+        </text>
+      </svg>
+      <span className="grid size-9 place-items-center rounded-full border border-lime/50 text-lime transition-all duration-500 group-hover:bg-lime group-hover:text-ink">
+        <span className="[animation:scroll-dot_1.6s_ease-in-out_infinite]">↓</span>
+      </span>
+    </button>
   );
 }
 
@@ -186,7 +416,7 @@ const BAND = ["Sites institucionais", "Landing pages", "Experiências 3D", "Web 
 
 export function Band() {
   return (
-    <section aria-label="O que entregamos" className="relative z-10 -my-2 overflow-hidden py-16">
+    <section aria-label="O que entregamos" data-chapter="1" data-chapter-start="top bottom" className="relative z-10 -my-2 overflow-hidden py-16">
       <div className="skew -rotate-2 bg-lime py-3 text-ink shadow-[0_30px_80px_rgba(200,240,49,0.25)]">
         <Marquee pauseOnHover className="[--duration:28s] [--gap:2.5rem]" repeat={4}>
           {BAND.map((b) => (
@@ -253,6 +483,7 @@ export function About() {
         <div className="founders glide mt-20 grid gap-5 [perspective:1200px] md:grid-cols-2">
           {FOUNDERS.map((f) => (
             <article key={f.initial} data-tilt="5" className="founder glass spot group relative overflow-hidden rounded-3xl p-7 md:p-9">
+              <BorderBeam size={240} duration={11} colorFrom="#c8f031" colorTo="#1fd1ba" delay={f.initial === "W" ? 5.5 : 0} />
               <div className="flex items-start justify-between">
                 <span className="font-display text-[7rem] font-extrabold leading-[0.8] text-lime transition-all duration-700 [-webkit-text-stroke:2px_transparent] group-hover:-translate-y-1 group-hover:rotate-[-4deg] group-hover:text-transparent group-hover:[-webkit-text-stroke:2px_#c8f031] md:text-[9rem]">
                   {f.initial}
@@ -280,8 +511,9 @@ export function About() {
             { v: 2, suffix: "", label: "devs dedicados" },
             { v: 100, suffix: "%", label: "código sob medida" },
             { v: 0, suffix: "", label: "templates prontos" },
-          ].map((s) => (
-            <div key={s.label} data-tilt="6" className="glass spot rounded-3xl p-6">
+          ].map((s, i) => (
+            <div key={s.label} data-tilt="6" className="glass spot relative overflow-hidden rounded-3xl p-6">
+              <BorderBeam size={110} duration={9} delay={i * 2.2} colorFrom="#c8f031" colorTo="#1fd1ba" />
               <dt className="label text-muted">{s.label}</dt>
               <dd className="mt-4 whitespace-nowrap font-display text-5xl font-extrabold text-paper md:text-6xl">
                 <NumberTicker value={s.v} className="text-paper dark:text-paper" />
@@ -331,29 +563,36 @@ export function Services() {
 
   useGSAP(
     () => {
-      if (prefersReducedMotion()) return;
-      const cards = gsap.utils.toArray<HTMLElement>(".svc-card");
-      cards.forEach((card, i) => {
-        const next = cards[i + 1];
-        if (!next) return;
-        gsap.to(card.querySelector(".svc-inner"), {
-          scale: 0.9,
-          ease: "none",
-          scrollTrigger: { trigger: next, start: "top 90%", end: "top 20%", scrub: true },
-        });
-        gsap.to(card.querySelector(".svc-shade"), {
-          opacity: 0.65,
-          ease: "none",
-          scrollTrigger: { trigger: next, start: "top 90%", end: "top 20%", scrub: true },
+      // Stacked cards are the phone/tablet (and reduced-motion) version; desktop gets the orbit
+      const mm = gsap.matchMedia();
+      mm.add("(max-width: 1023px) and (prefers-reduced-motion: no-preference)", () => {
+        const cards = gsap.utils.toArray<HTMLElement>(".svc-card");
+        cards.forEach((card, i) => {
+          const next = cards[i + 1];
+          if (!next) return;
+          gsap.to(card.querySelector(".svc-inner"), {
+            scale: 0.88,
+            rotationX: 14,
+            yPercent: -3,
+            transformPerspective: 1400,
+            ease: "none",
+            scrollTrigger: { trigger: next, start: "top 90%", end: "top 20%", scrub: true },
+          });
+          gsap.to(card.querySelector(".svc-shade"), {
+            opacity: 0.65,
+            ease: "none",
+            scrollTrigger: { trigger: next, start: "top 90%", end: "top 20%", scrub: true },
+          });
         });
       });
+      return () => mm.revert();
     },
     { scope: root }
   );
 
   return (
-    <section id="servicos" ref={root} className="relative px-4 py-28 md:px-10 md:py-36">
-      <div className="mx-auto max-w-[1400px]">
+    <section id="servicos" data-chapter="2" ref={root} className="relative py-28 md:py-36">
+      <div className="mx-auto max-w-[1400px] px-4 md:px-10">
         <div className="flex flex-wrap items-end justify-between gap-6">
           <div>
             <SectionLabel index="02">O que sai daqui</SectionLabel>
@@ -367,7 +606,7 @@ export function Services() {
           </p>
         </div>
 
-        <div className="mt-16 flex flex-col gap-6">
+        <div className="mt-16 flex flex-col gap-6 lg:motion-safe:hidden">
           {SERVICES.map((s, i) => (
             <article
               key={s.n}
@@ -414,7 +653,132 @@ export function Services() {
           ))}
         </div>
       </div>
+      <ServiceOrbit />
     </section>
+  );
+}
+
+/**
+ * Desktop services: the section pins and the black hole moves in beside the copy. Each service
+ * is a planet riding its orbit (drawn by the 3D scene); scrolling turns the orbit, the planet in
+ * front is the service described on the left, and labels follow the planets on screen.
+ */
+function ServiceOrbit() {
+  const stage = useRef<HTMLDivElement>(null);
+  const labels = useRef<(HTMLDivElement | null)[]>([]);
+  const [active, setActive] = useState(0);
+
+  useGSAP(
+    () => {
+      const mm = gsap.matchMedia();
+      mm.add("(min-width: 1024px) and (prefers-reduced-motion: no-preference)", () => {
+        let shown = 0;
+        const tween = gsap.fromTo(
+          scrollStore.orbit,
+          { p: 0 },
+          {
+            p: SERVICES.length - 1,
+            ease: "none",
+            scrollTrigger: {
+              trigger: stage.current,
+              start: "top top",
+              end: () => `+=${(SERVICES.length - 1) * 85 + 40}%`,
+              pin: true,
+              scrub: 0.7,
+              invalidateOnRefresh: true,
+              onToggle: (self) => void (scrollStore.orbit.on = self.isActive ? 1 : 0),
+            },
+            onUpdate: () => {
+              const i = Math.round(scrollStore.orbit.p);
+              if (i !== shown) setActive((shown = i));
+            },
+          }
+        );
+
+        // Labels ride next to their planets every frame
+        const tick = () => {
+          scrollStore.fx.planets.forEach((pl, i) => {
+            const el = labels.current[i];
+            if (!el) return;
+            el.style.transform = `translate3d(${pl.x + 26 + pl.active * 22}px, ${pl.y}px, 0) translateY(-50%)`;
+            el.style.opacity = String(pl.o * (0.45 + pl.active * 0.55));
+          });
+        };
+        gsap.ticker.add(tick);
+        return () => {
+          gsap.ticker.remove(tick);
+          tween.scrollTrigger?.kill();
+          tween.kill();
+          scrollStore.orbit.on = 0;
+        };
+      });
+      return () => mm.revert();
+    },
+    { scope: stage }
+  );
+
+  const s = SERVICES[active];
+  return (
+    <div ref={stage} className="relative hidden h-svh overflow-hidden lg:motion-safe:block">
+      <div className="absolute left-10 top-1/2 w-[min(36vw,520px)] -translate-y-1/2">
+        <div className="flex items-center gap-4">
+          <span className="font-display text-5xl font-extrabold tabular-nums text-lime">{s.n}</span>
+          <span className="label text-muted">/ 0{SERVICES.length}</span>
+          <div className="ml-2 flex flex-1 gap-1.5">
+            {SERVICES.map((x, i) => (
+              <span
+                key={x.n}
+                className={"h-0.5 flex-1 rounded-full transition-colors duration-500 " + (i <= active ? "bg-lime" : "bg-white/15")}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="glass relative mt-6 grid overflow-hidden rounded-[2rem] p-8">
+          <BorderBeam size={280} duration={12} colorFrom="#c8f031" colorTo="#1fd1ba" />
+          {SERVICES.map((x, i) => (
+            <article
+              key={x.n}
+              aria-hidden={i !== active}
+              className={
+                "[grid-area:1/1] transition-all duration-700 ease-[cubic-bezier(.2,.8,.2,1)] " +
+                (i === active ? "translate-y-0 opacity-100" : i < active ? "pointer-events-none -translate-y-6 opacity-0" : "pointer-events-none translate-y-6 opacity-0")
+              }
+            >
+              <h3 className="font-display text-4xl font-bold uppercase leading-none tracking-tight xl:text-5xl">{x.title}</h3>
+              <p className="mt-5 text-lg text-paper/70">{x.text}</p>
+              <ul className="mt-6 grid grid-cols-2 gap-x-6">
+                {x.items.map((it) => (
+                  <li key={it} className="flex items-center gap-2 border-b border-white/10 py-3 text-paper/85">
+                    <span className="size-1.5 rounded-full bg-lime" />
+                    {it}
+                  </li>
+                ))}
+              </ul>
+            </article>
+          ))}
+        </div>
+        <p className="label mt-6 text-muted">Role para girar a órbita ↓</p>
+      </div>
+
+      {/* Labels that follow the planets drawn by the 3D scene */}
+      <div aria-hidden className="pointer-events-none absolute inset-0">
+        {SERVICES.map((x, i) => (
+          <div
+            key={x.n}
+            ref={(el) => {
+              labels.current[i] = el;
+            }}
+            className="absolute left-0 top-0 flex items-center gap-2 whitespace-nowrap opacity-0 will-change-transform"
+          >
+            <span className="h-px w-6 bg-lime/60" />
+            <span className={"label " + (i === active ? "text-lime" : "text-paper/70")}>
+              {x.n} · {x.title}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -436,6 +800,9 @@ const SUMMARY = [
 export function Summary() {
   return (
     <section aria-labelledby="resumo" className="relative px-4 py-24 md:px-10 md:py-32">
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+        <Meteors number={14} minDuration={4} maxDuration={11} />
+      </div>
       <div className="mx-auto max-w-[1400px]">
         <h2
           id="resumo"
@@ -453,6 +820,7 @@ export function Summary() {
                 (i === 1 ? "spot-dark bg-lime text-ink" : "glass text-paper")
               }
             >
+              {i !== 1 && <BorderBeam size={200} duration={10} delay={i * 3} colorFrom="#c8f031" colorTo="#1fd1ba" />}
               <span className={"label " + (i === 1 ? "text-ink/60" : "text-lime")}>0{i + 1}</span>
               <h3 className="mt-6 font-display text-3xl font-bold uppercase leading-none tracking-tight md:text-4xl">
                 {s.q}

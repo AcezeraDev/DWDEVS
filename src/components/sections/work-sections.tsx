@@ -1,13 +1,16 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import SplitType from "split-type";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
 import { Logo, Magnetic, RollText, SectionLabel } from "@/components/ui-kit";
-import { prefersReducedMotion, scrollToTarget } from "@/lib/scroll-store";
+import { BorderBeam } from "@/components/ui/border-beam";
+import { Meteors } from "@/components/ui/meteors";
+import { JET_POINT, offsetIn, prefersReducedMotion, scrollStore, scrollToTarget } from "@/lib/scroll-store";
 import { LINKEDIN } from "./intro-sections";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
@@ -129,6 +132,9 @@ const PROJECTS = [
   },
 ];
 
+/** Echo layers of each project card, one per "dimension". */
+const GHOSTS = ["#c8f031", "#1fd1ba", "#ff5fa2"];
+
 function ProjectCard({ p, i }: { p: (typeof PROJECTS)[number]; i: number }) {
   const card = useRef<HTMLAnchorElement>(null);
 
@@ -230,58 +236,125 @@ function ProjectTunnel() {
         const names = gsap.utils.toArray<HTMLElement>(".tn-name");
         const infos = gsap.utils.toArray<HTMLElement>(".tn-info");
         const imgs = gsap.utils.toArray<HTMLElement>(".tn-img");
+        const frames = gsap.utils.toArray<HTMLElement>(".tn-frame");
+        const space = root.current!.querySelector<HTMLElement>(".tn-space")!;
         const glow = root.current!.querySelector(".tn-glow");
         const n = cards.length;
 
-        gsap.set(cards, {
-          xPercent: -50,
-          yPercent: -50,
-          z: -2600,
-          rotationX: 26,
-          rotationY: (i: number) => (i % 2 ? -24 : 24),
-          rotationZ: (i: number) => (i % 2 ? 4 : -4),
-          autoAlpha: 0,
-        });
+        gsap.set(cards, { xPercent: -50, yPercent: -50 });
+        // Cards only toggle visibility: opacity on them would flatten their 3D, so fades go on the
+        // inner frame and the echo layers instead
+        gsap.set(cards, { visibility: "hidden" });
+        gsap.set(".tn-ghost", { autoAlpha: 0 });
+
+        // The whole space leans toward the cursor, so the echo layers separate in depth
+        const leanY = gsap.quickTo(space, "rotationY", { duration: 1.2, ease: "power3.out" });
+        const leanX = gsap.quickTo(space, "rotationX", { duration: 1.2, ease: "power3.out" });
+        const lean = (e: PointerEvent) => {
+          leanY((e.clientX / window.innerWidth - 0.5) * 10);
+          leanX(-(e.clientY / window.innerHeight - 0.5) * 7);
+        };
+        window.addEventListener("pointermove", lean);
         gsap.set(names, { xPercent: 35, autoAlpha: 0 });
         gsap.set(infos, { y: 50, autoAlpha: 0 });
+
+        // Every project comes out of the black hole parked top-right in this chapter (JET_POINT).
+        // Cards start deep in z and shrunk, placed so their perspective projection lands right
+        // on the hole; they fly down the jet to the middle, then rush past the camera.
+        // Each project owns STEP of timeline: fly out of the hole (0.65), sit still to be read,
+        // rush past the camera (from 1.15), a beat of pure warp, then the next one comes out.
+        const STEP = 1.4;
+        const P = 1400; // the stage's CSS perspective
+        const DEPTH = -3000;
+        const k = P / (P - DEPTH);
+        const mouthX = () => ((JET_POINT.x * 0.5 + 0.5) * window.innerWidth - window.innerWidth / 2) / k - window.innerWidth * 0.06;
+        const mouthY = () => ((0.5 - JET_POINT.y * 0.5) * window.innerHeight - window.innerHeight / 2) / k;
 
         const tl = gsap.timeline({
           defaults: { ease: "none" },
           scrollTrigger: {
             trigger: root.current,
             start: "top top",
-            end: () => `+=${n * 115}%`,
+            end: () => `+=${n * 140}%`,
             pin: true,
             scrub: 1.1,
             invalidateOnRefresh: true,
             onUpdate: (self) => gsap.set(".tn-progress", { scaleX: self.progress }),
+            onToggle: (self) => void (self.isActive || (scrollStore.fx.warp = 0)),
           },
-          // Card i owns the timeline from t = i to i + 1, so the counter follows the playhead.
           onUpdate: () => {
-            const idx = gsap.utils.clamp(0, n - 1, Math.floor(tl.time() + 0.05));
+            const t = tl.time();
+            const idx = gsap.utils.clamp(0, n - 1, Math.floor((t + 0.2) / STEP));
             if (counter.current) counter.current.textContent = String(idx + 1).padStart(2, "0");
+            // Warp peaks at each handover (t = k * STEP), between one card leaving and the next arriving
+            const f = (((t + 0.05) % STEP) + STEP) % STEP;
+            const d = Math.min(f, STEP - f);
+            scrollStore.fx.warp = t > 1 && t < (n - 1) * STEP + 0.4 ? Math.max(0, 1 - d / 0.4) : 0;
           },
         });
 
         cards.forEach((card, i) => {
-          const t = i;
+          const t = i * STEP;
           const accent = card.dataset.accent ?? "#c8f031";
-          // Arrive from the depth, unwinding the tilt
-          tl.to(card, { z: 0, rotationX: 0, rotationY: 0, rotationZ: 0, autoAlpha: 1, duration: 0.6, ease: "power3.out" }, t)
+          const side = i % 2 ? -1 : 1;
+          tl.fromTo(
+            card,
+            {
+              x: mouthX,
+              y: mouthY,
+              z: DEPTH,
+              scale: 0.25,
+              rotationX: 18,
+              rotationY: 32 * side,
+              rotationZ: -20 * side,
+            },
+            { x: 0, y: 0, z: 0, scale: 1, rotationX: 0, rotationY: 0, rotationZ: 0, duration: 0.65, ease: "power3.out" },
+            t
+          )
+            // Filters go on the inner frame: on the card they would flatten its 3D (and the echoes)
+            .fromTo(frames[i], { filter: "blur(10px) brightness(2.2)" }, { filter: "blur(0px) brightness(1)", duration: 0.65, ease: "power2.out" }, t)
+            // Echoes trail behind in depth, then fold into the card as it settles
+            .fromTo(
+              cards[i].querySelectorAll(".tn-ghost"),
+              { z: (g: number) => -(g + 1) * 520, x: (g: number) => (g - 1) * 70, y: (g: number) => (g - 1) * -40, autoAlpha: 0.6 },
+              { z: 0, x: 0, y: 0, autoAlpha: 0, duration: 0.8, ease: "power3.out" },
+              t
+            )
+            .set(card, { visibility: "visible" }, t)
+            .fromTo(frames[i], { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.18 }, t)
             .to(glow, { "--accent": accent, duration: 0.6 }, t)
-            .to(names[i], { xPercent: 0, autoAlpha: 1, duration: 0.6, ease: "power2.out" }, t)
-            .to(infos[i], { y: 0, autoAlpha: 1, duration: 0.3, ease: "power2.out" }, t + 0.35)
-            .fromTo(imgs[i], { yPercent: 0, scale: 1.12 }, { yPercent: -6, scale: 1, duration: 1.2 }, t)
-            .addLabel(`p${i}`, t + 0.65);
+            .to(names[i], { xPercent: 0, autoAlpha: 1, duration: 0.6, ease: "power2.out" }, t + 0.1)
+            .to(infos[i], { y: 0, autoAlpha: 1, duration: 0.3, ease: "power2.out" }, t + 0.4)
+            .fromTo(imgs[i], { yPercent: 0, scale: 1.12 }, { yPercent: -6, scale: 1, duration: STEP }, t)
+            .addLabel(`p${i}`, t + 0.7);
 
           if (i < n - 1) {
-            // Rush past the camera while the next one is already on its way
-            tl.to(infos[i], { y: -40, autoAlpha: 0, duration: 0.25, ease: "power2.in" }, t + 0.9)
-              .to(names[i], { xPercent: -35, autoAlpha: 0, duration: 0.6, ease: "power2.in" }, t + 0.9)
-              .to(card, { z: 1300, rotationX: -14, autoAlpha: 0, duration: 0.6, ease: "power3.in" }, t + 0.95);
+            // Rush past the camera, smearing, while the next one is already out of the hole
+            tl.to(infos[i], { y: -40, autoAlpha: 0, duration: 0.25, ease: "power2.in" }, t + 1.05)
+              .to(names[i], { xPercent: -35, autoAlpha: 0, duration: 0.5, ease: "power2.in" }, t + 1.05)
+              .to(card, { z: 1250, rotationX: -14, duration: 0.55, ease: "power3.in" }, t + 1.1)
+              .to(frames[i], { filter: "blur(8px) brightness(1.4)", duration: 0.55, ease: "power3.in" }, t + 1.1)
+              // ...and splits into its echoes, flung apart in depth
+              .to(
+                card.querySelectorAll(".tn-ghost"),
+                {
+                  z: (g: number) => (g - 1) * 420,
+                  x: (g: number) => (g - 1) * 140,
+                  y: (g: number) => (1 - g) * 60,
+                  rotationZ: (g: number) => (g - 1) * 6,
+                  duration: 0.4,
+                  ease: "power2.out",
+                },
+                t + 1.08
+              )
+              .to(card.querySelectorAll(".tn-ghost"), { autoAlpha: 0.65, duration: 0.12 }, t + 1.08)
+              .to(card.querySelectorAll(".tn-ghost"), { autoAlpha: 0, duration: 0.25 }, t + 1.22)
+              .to(frames[i], { autoAlpha: 0, duration: 0.22, ease: "power1.in" }, t + 1.22)
+              .set(card, { visibility: "hidden" }, t + 1.5);
           }
         });
         tl.to({}, { duration: 0.35 });
+        return () => window.removeEventListener("pointermove", lean);
       });
       return () => mm.revert();
     },
@@ -306,15 +379,16 @@ function ProjectTunnel() {
         {PROJECTS.map((p) => (
           <span
             key={p.name}
-            className="tn-name absolute left-0 w-full whitespace-nowrap text-center font-display text-[13vw] font-extrabold uppercase leading-none tracking-[-0.04em] text-transparent [-webkit-text-stroke:1.5px_rgba(241,240,232,0.14)]"
+            className="tn-name absolute left-0 w-full whitespace-nowrap text-center font-display text-[13vw] font-extrabold uppercase leading-none tracking-[-0.04em] text-transparent [-webkit-text-stroke:1px_rgba(241,240,232,0.08)]"
           >
             {p.name}
           </span>
         ))}
       </div>
 
-      {/* 3D stage */}
+      {/* 3D stage: the inner space tilts with the cursor so the layers read as real depth */}
       <div className="absolute inset-0 [perspective:1400px] [transform-style:preserve-3d]">
+        <div className="tn-space absolute inset-0 [transform-style:preserve-3d]">
         {PROJECTS.map((p) => (
           <a
             key={p.name}
@@ -323,11 +397,29 @@ function ProjectTunnel() {
             rel="noreferrer"
             data-cursor="view"
             data-accent={p.accent}
-            className="tn-card group absolute left-[56%] top-1/2 block w-[min(60vw,calc((100svh-220px)*1.6),1100px)] will-change-transform"
+            className="tn-card group absolute left-[56%] top-1/2 block w-[min(60vw,calc((100svh-220px)*1.6),1100px)] will-change-transform [transform-style:preserve-3d]"
           >
+            {/* Echoes of the site from neighbouring dimensions: they trail it out of the hole,
+                merge into it when it lands, and split off again as it leaves */}
+            {GHOSTS.map((color) => (
+              <div
+                key={color}
+                aria-hidden
+                className="tn-ghost pointer-events-none absolute inset-0 rounded-[1.6rem] border-2 opacity-0 mix-blend-screen"
+                style={{
+                  borderColor: color,
+                  backgroundImage: `url(${p.img})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "top",
+                  backgroundColor: color,
+                  backgroundBlendMode: "multiply",
+                  boxShadow: `0 0 40px ${color}55`,
+                }}
+              />
+            ))}
             <div
               data-tilt="4"
-              className="relative overflow-hidden rounded-[1.6rem] border border-white/10 bg-ink-2 shadow-[0_60px_160px_-40px_rgba(0,0,0,0.9)]"
+              className="tn-frame relative overflow-hidden rounded-[1.6rem] border border-white/10 bg-ink-2 shadow-[0_60px_160px_-40px_rgba(0,0,0,0.9)]"
             >
               <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3">
                 <span className="size-2.5 rounded-full bg-white/20" />
@@ -354,12 +446,14 @@ function ProjectTunnel() {
             </div>
           </a>
         ))}
+        </div>
       </div>
 
       {/* Info panel */}
       <div className="pointer-events-none absolute bottom-10 left-10 w-[min(30vw,420px)]">
         {PROJECTS.map((p, i) => (
-          <div key={p.name} className="tn-info glass absolute bottom-0 left-0 w-full rounded-3xl p-7">
+          <div key={p.name} className="tn-info glass absolute bottom-0 left-0 w-full overflow-hidden rounded-3xl p-7">
+            <BorderBeam size={200} duration={9} colorFrom={p.accent} colorTo="#c8f031" />
             <div className="flex items-baseline gap-4">
               <span className="font-display text-5xl font-extrabold text-lime">0{i + 1}</span>
               <p className="label text-muted">{p.kind}</p>
@@ -378,7 +472,7 @@ function ProjectTunnel() {
       </div>
 
       {/* HUD */}
-      <div className="label pointer-events-none absolute right-10 top-28 flex items-baseline gap-2 text-muted">
+      <div className="label pointer-events-none absolute left-10 top-28 flex items-baseline gap-2 text-muted">
         <span ref={counter} className="font-display text-5xl font-extrabold text-paper">
           01
         </span>
@@ -413,7 +507,7 @@ export function Projects() {
   );
 
   return (
-    <section id="projetos" ref={root} className="relative pt-28 lg:pt-36">
+    <section id="projetos" data-chapter="3" ref={root} className="relative pt-28 lg:pt-36">
       <div className="mx-auto flex max-w-[1400px] flex-wrap items-end justify-between gap-6 px-4 md:px-10">
         <div>
           <SectionLabel index="04">Trabalho real, cliente real</SectionLabel>
@@ -459,6 +553,14 @@ export function Process() {
           scrollTrigger: { trigger: ".proc-list", start: "top 70%", end: "bottom 60%", scrub: true },
         }
       );
+      // Text fills both columns here, so the black hole tucks into the corner while it passes
+      ScrollTrigger.create({
+        trigger: root.current,
+        start: "top 85%",
+        end: "top 35%",
+        onUpdate: (self) => void (scrollStore.tuck = self.progress),
+        onLeaveBack: () => void (scrollStore.tuck = 0),
+      });
       gsap.utils.toArray<HTMLElement>(".proc-step").forEach((el) => {
         ScrollTrigger.create({
           trigger: el,
@@ -473,6 +575,9 @@ export function Process() {
 
   return (
     <section ref={root} className="relative px-4 py-28 md:px-10 md:py-36">
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+        <Meteors number={10} minDuration={4} maxDuration={11} />
+      </div>
       <div className="mx-auto grid max-w-[1400px] gap-12 lg:grid-cols-[1fr_1.3fr]">
         <div className="lg:sticky lg:top-32 lg:self-start">
           <SectionLabel index="05">Do papo ao deploy</SectionLabel>
@@ -505,11 +610,59 @@ export function Process() {
 }
 
 export function Contact() {
+  const root = useRef<HTMLElement>(null);
+
+  // The black hole parks behind the round button (see the scene) and the headline pours out
+  // of it as the section scrolls in: every letter starts inside the button and flies to its place.
+  useGSAP(
+    () => {
+      const split = new SplitType(".emit-title", { types: "words,chars" });
+      if (!prefersReducedMotion()) {
+        const section = root.current!;
+        const core = section.querySelector<HTMLElement>("#cta-core")!;
+        const chars = gsap.utils.toArray<HTMLElement>(".emit-title .char");
+        const from = (el: HTMLElement) => {
+          const a = offsetIn(core, section);
+          const b = offsetIn(el, section);
+          return { x: a.x - b.x, y: a.y - b.y };
+        };
+        const tl = gsap.timeline({
+          defaults: { ease: "none" },
+          scrollTrigger: { trigger: section, start: "top 80%", end: "top 5%", scrub: 0.8, invalidateOnRefresh: true },
+        });
+        chars
+          .map((el) => ({ el, d: Math.hypot(from(el).x, from(el).y) }))
+          .sort((a, b) => a.d - b.d)
+          .forEach(({ el }, i) => {
+            tl.fromTo(
+              el,
+              {
+                x: () => from(el).x,
+                y: () => from(el).y,
+                rotation: (i % 2 ? 1 : -1) * (180 + (i % 4) * 60),
+                scale: 0.05,
+                opacity: 0,
+              },
+              { x: 0, y: 0, rotation: 0, scale: 1, opacity: 1, duration: 0.5, ease: "power3.out" },
+              (i / chars.length) * 0.5
+            );
+          });
+        tl.set(chars, { transition: "none" }, 0);
+        tl.set(chars, { clearProps: "transform,opacity,transition" });
+      }
+      return () => split.revert();
+    },
+    { scope: root }
+  );
+
   return (
-    <section id="contato" className="relative flex min-h-svh flex-col justify-center px-4 py-28 md:px-10">
+    <section id="contato" data-chapter="4" ref={root} className="relative flex min-h-svh flex-col justify-center px-4 py-28 md:px-10">
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+        <Meteors number={18} minDuration={4} maxDuration={11} />
+      </div>
       <div className="mx-auto w-full max-w-[1400px] text-center">
         <SectionLabel index="06">Agora é com você</SectionLabel>
-        <h2 className="cine char-hover mx-auto mt-10 max-w-6xl font-display text-[clamp(2.4rem,9vw,10rem)] font-extrabold uppercase leading-[0.88] tracking-[-0.04em]">
+        <h2 className="emit-title char-hover mx-auto mt-10 max-w-6xl font-display text-[clamp(2.4rem,9vw,10rem)] font-extrabold uppercase leading-[0.88] tracking-[-0.04em]">
           Vamos criar o seu site?
         </h2>
         <p className="mx-auto mt-8 max-w-lg text-lg text-paper/70">
@@ -518,6 +671,7 @@ export function Contact() {
         <div className="mt-14 flex flex-col items-center justify-center gap-5 sm:flex-row">
           <Magnetic strength={0.45}>
             <a
+              id="cta-core"
               href={LINKEDIN}
               target="_blank"
               rel="noreferrer"
@@ -535,8 +689,9 @@ export function Contact() {
             href={LINKEDIN}
             target="_blank"
             rel="noreferrer"
-            className="glass rounded-full px-6 py-3 text-paper/80 transition-colors hover:text-lime"
+            className="glass relative overflow-hidden rounded-full px-6 py-3 text-paper/80 transition-colors hover:text-lime"
           >
+            <BorderBeam size={70} duration={6} colorFrom="#c8f031" colorTo="#1fd1ba" />
             <RollText>LinkedIn · /in/dwdevs</RollText>
           </a>
           <span className="glass rounded-full px-6 py-3 text-paper/60">Mauá · São Paulo · Brasil</span>
