@@ -553,6 +553,14 @@ export function Process() {
           scrollTrigger: { trigger: ".proc-list", start: "top 70%", end: "bottom 60%", scrub: true },
         }
       );
+      // Text fills both columns here, so the black hole tucks into the corner while it passes
+      ScrollTrigger.create({
+        trigger: root.current,
+        start: "top 85%",
+        end: "top 35%",
+        onUpdate: (self) => void (scrollStore.tuck = self.progress),
+        onLeaveBack: () => void (scrollStore.tuck = 0),
+      });
       gsap.utils.toArray<HTMLElement>(".proc-step").forEach((el) => {
         ScrollTrigger.create({
           trigger: el,

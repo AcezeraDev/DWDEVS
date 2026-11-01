@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
+import { AnimatePresence, motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { DIVE_POINT, cinematicTo, prefersReducedMotion, scrollStore, scrollToTarget } from "@/lib/scroll-store";
 
@@ -379,35 +380,42 @@ export function ChapterRail() {
   );
 }
 
+/** The legs of the trip through the hole, as the HUD names them (index = phase, 0 = no HUD). */
+const PHASES = [
+  null,
+  { long: "Caindo no buraco negro", short: "Caindo" },
+  { long: "Atravessando o horizonte de eventos", short: "Horizonte" },
+  { long: "Dentro do buraco negro", short: "Lá dentro" },
+  { long: "Saindo pelo buraco branco", short: "Saindo" },
+];
+
+function journeyPhase() {
+  const { fall, cross, tunnel, exit } = scrollStore.fx;
+  if (exit > 0.04) return exit < 0.7 ? 4 : 0;
+  if (tunnel > 0.12) return 3;
+  if (cross > 0.06) return 2;
+  return fall > 0.3 ? 1 : 0;
+}
+
 /**
  * Screen-space layer between the 3D scene and the page: the edges close in while you fall into
- * the black hole (and a little on fast scrolls), a shock ring and a white-lime flash mark the
- * crossing of the horizon, and a readout counts the fall.
+ * the black hole (and a little on fast scrolls), and a readout names each leg of the trip through
+ * it with how deep you are. The crossing itself is drawn by the wormhole in the 3D scene.
  */
 export function HorizonFx() {
   const vignette = useRef<HTMLDivElement>(null);
-  const flash = useRef<HTMLDivElement>(null);
-  const ring = useRef<HTMLDivElement>(null);
-  const hud = useRef<HTMLDivElement>(null);
-  const count = useRef<HTMLSpanElement>(null);
+  const count = useRef<HTMLSpanElement | null>(null);
+  const [phase, setPhase] = useState(0);
 
   useEffect(() => {
     if (prefersReducedMotion()) return;
-    const bump = (x: number, a: number, b: number) => Math.max(0, Math.min((x - a) / (b - a), 1));
+    let shown = 0;
     const tick = () => {
-      const dive = scrollStore.dive * (1 - scrollStore.legs[1]);
-      const { crossing, speed } = scrollStore.fx;
-      if (vignette.current) vignette.current.style.opacity = String(Math.min(1, dive * 0.95 + speed * 0.45));
-      if (flash.current) flash.current.style.opacity = String(crossing * 0.75);
-      if (ring.current) {
-        const t = bump(dive, 0.84, 1);
-        ring.current.style.opacity = String(Math.sin(t * Math.PI) * 0.9);
-        ring.current.style.transform = `translate(-50%, -50%) scale(${0.15 + t * t * 4})`;
-      }
-      if (hud.current) {
-        hud.current.style.opacity = String(Math.min(bump(dive, 0.3, 0.42), 1 - bump(dive, 0.9, 0.98)));
-        if (count.current) count.current.textContent = String(Math.round(dive * 100)).padStart(3, "0");
-      }
+      const { fall, cross, exit, speed } = scrollStore.fx;
+      if (vignette.current) vignette.current.style.opacity = String(Math.min(1, fall * (1 - cross) * 0.95 + cross * (1 - exit) * 0.6 + speed * 0.45));
+      const p = journeyPhase();
+      if (p !== shown) setPhase((shown = p));
+      if (count.current) count.current.textContent = String(Math.round(Math.min(scrollStore.dive * 0.85 + exit * 0.15, 1) * 100)).padStart(3, "0");
     };
     gsap.ticker.add(tick);
     return () => gsap.ticker.remove(tick);
@@ -415,6 +423,7 @@ export function HorizonFx() {
 
   const cx = `${(DIVE_POINT.x * 0.5 + 0.5) * 100}%`;
   const cy = `${(0.5 - DIVE_POINT.y * 0.5) * 100}%`;
+  const label = PHASES[phase];
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 z-[5] overflow-hidden">
       <div
@@ -422,22 +431,36 @@ export function HorizonFx() {
         className="absolute inset-0 opacity-0"
         style={{ background: `radial-gradient(ellipse 70% 65% at ${cx} ${cy}, transparent 35%, rgba(3,4,5,0.92) 100%)` }}
       />
-      <div
-        ref={flash}
-        className="absolute inset-0 opacity-0 mix-blend-screen"
-        style={{ background: `radial-gradient(circle at ${cx} ${cy}, #f6ffd8 0%, rgba(200,240,49,0.85) 18%, rgba(200,240,49,0.15) 55%, transparent 75%)` }}
-      />
-      <div
-        ref={ring}
-        className="absolute size-[60vmax] rounded-full border-2 border-lime opacity-0 shadow-[0_0_80px_rgba(200,240,49,0.6),inset_0_0_80px_rgba(200,240,49,0.4)]"
-        style={{ left: cx, top: cy }}
-      />
-      <div ref={hud} className="label absolute bottom-10 left-1/2 flex -translate-x-1/2 items-center gap-4 whitespace-nowrap text-paper/70 opacity-0">
-        <span className="hidden h-px w-10 bg-lime/60 sm:block" />
-        <span className="sm:hidden">Horizonte de eventos</span>
-        <span className="hidden sm:inline">Atravessando o horizonte de eventos</span>
-        <span ref={count} className="font-display text-base font-bold tabular-nums text-lime">000</span>
-        <span className="hidden h-px w-10 bg-lime/60 sm:block" />
+      <div className="absolute inset-x-0 bottom-8 flex justify-center sm:bottom-10">
+        <AnimatePresence mode="popLayout" initial={false}>
+          {label && (
+            <motion.div
+              key={phase}
+              initial={{ y: 28, opacity: 0, scale: 0.9, filter: "blur(8px)" }}
+              animate={{ y: 0, opacity: 1, scale: 1, filter: "blur(0px)" }}
+              exit={{ y: -28, opacity: 0, scale: 0.95, filter: "blur(8px)" }}
+              transition={{ type: "spring", stiffness: 300, damping: 30, mass: 1 }}
+              className="label flex items-center gap-4 whitespace-nowrap rounded-full border border-white/10 bg-ink/70 px-5 py-2.5 text-paper/80 backdrop-blur-xl"
+            >
+              <span className="flex gap-1">
+                {[1, 2, 3, 4].map((i) => (
+                  <span key={i} className={"h-1 w-3 rounded-full " + (i <= phase ? "bg-lime" : "bg-white/20")} />
+                ))}
+              </span>
+              <span className="sm:hidden">{label.short}</span>
+              <span className="hidden sm:inline">{label.long}</span>
+              {/* Only ever points at the newest readout (the old one is still leaving) */}
+              <span
+                ref={(el) => {
+                  if (el) count.current = el;
+                }}
+                className="font-display text-base font-bold tabular-nums text-lime"
+              >
+                000
+              </span>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

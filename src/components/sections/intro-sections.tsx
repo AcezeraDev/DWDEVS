@@ -10,7 +10,16 @@ import { Marquee } from "@/components/ui/marquee";
 import { Meteors } from "@/components/ui/meteors";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { Logo, Magnetic, RollText, SectionLabel } from "@/components/ui-kit";
-import { DIVE_POINT, cinematicTo, offsetIn, prefersReducedMotion, scrollStore, scrollToTarget } from "@/lib/scroll-store";
+import {
+  DIVE_LENGTH,
+  DIVE_POINT,
+  JOURNEY,
+  cinematicTo,
+  offsetIn,
+  prefersReducedMotion,
+  scrollStore,
+  scrollToTarget,
+} from "@/lib/scroll-store";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
@@ -84,14 +93,54 @@ export function Hero() {
     () => {
       const split = new SplitType(".hero-line", { types: "words,chars" });
       gsap.set(".hero-line .word", { whiteSpace: "nowrap" });
-      gsap.set(".hero-line .char", { yPercent: 115, skewY: 8 });
+      // Each letter gets an inner span for the intro, so the intro and the scroll dive below (which
+      // moves the .char itself) never write the same transform or opacity
+      split.chars?.forEach((c) => {
+        const inner = document.createElement("span");
+        inner.className = "ci inline-block";
+        inner.textContent = c.textContent;
+        c.replaceChildren(inner);
+      });
+      gsap.set(".hero-line .ci", { opacity: 0 });
       gsap.set(".hero-fade", { opacity: 0, yPercent: 30 });
 
+      // Intro: the headline is born out of the black hole. Each letter is flung out of the disk
+      // (closest ones first), curving with its spin, and lands in place.
+      let intro: gsap.core.Timeline | null = null;
       const play = () => {
-        gsap
-          .timeline()
-          .to(".hero-line .char", { yPercent: 0, skewY: 0, duration: 1.1, ease: "expo.out", stagger: 0.025 })
-          .to(".hero-fade", { opacity: 1, yPercent: 0, duration: 0.9, ease: "power3.out", stagger: 0.08 }, "-=0.7");
+        const chars = gsap.utils.toArray<HTMLElement>(".hero-line .ci");
+        const h = scrollStore.fx.hole;
+        const hole = h.r > 0 ? { x: h.x, y: h.y } : { x: window.innerWidth * 0.78, y: window.innerHeight * 0.47 };
+        const from = chars.map((el) => {
+          const r = el.getBoundingClientRect();
+          return { dx: hole.x - (r.left + r.width / 2), dy: hole.y - (r.top + r.height / 2), w: r.width || 1, h: r.height || 1 };
+        });
+        const tl = (intro = gsap.timeline());
+        if (prefersReducedMotion()) {
+          tl.set(chars, { opacity: 1 });
+        } else {
+          chars
+            .map((el, i) => ({ el, f: from[i], d: Math.hypot(from[i].dx, from[i].dy) }))
+            .sort((a, b) => a.d - b.d)
+            .forEach(({ el, f }, k) => {
+              // Halfway out it is still swinging round the hole, along the disk's spin
+              const mx = f.dx * 0.42 - f.dy * 0.32;
+              const my = f.dy * 0.42 + f.dx * 0.32;
+              tl.fromTo(
+                el,
+                { xPercent: (f.dx / f.w) * 100, yPercent: (f.dy / f.h) * 100, rotationY: k % 2 ? 80 : -80, skewY: 12, opacity: 0 },
+                {
+                  keyframes: { xPercent: [(f.dx / f.w) * 100, (mx / f.w) * 100, 0], yPercent: [(f.dy / f.h) * 100, (my / f.h) * 100, 0], easeEach: "sine.out" },
+                  rotationY: 0,
+                  skewY: 0,
+                  duration: 1.6,
+                  ease: "expo.out",
+                },
+                k * 0.022
+              ).to(el, { opacity: 1, duration: 0.35, ease: "power1.out" }, k * 0.022);
+            });
+        }
+        tl.to(".hero-fade", { opacity: 1, yPercent: 0, duration: 0.9, ease: "power3.out", stagger: 0.08 }, 0.7);
       };
       window.addEventListener("dw:ready", play, { once: true });
 
@@ -119,11 +168,16 @@ export function Hero() {
           scrollTrigger: {
             trigger: section,
             start: "top top",
-            end: "+=140%",
+            end: `+=${DIVE_LENGTH * 100}%`,
             pin: true,
             scrub: 0.6,
             invalidateOnRefresh: true,
-            onUpdate: (self) => void (scrollStore.dive = self.progress),
+            onUpdate: (self) => {
+              scrollStore.dive = self.progress;
+              // Scrolling in before the intro has landed: land it now, so the fade-ins below
+              // (which share opacity with the dive) are not still running while it swallows them
+              if (intro?.isActive()) intro.progress(1);
+            },
             onLeaveBack: () => void (scrollStore.dive = 0),
           },
         });
@@ -150,6 +204,8 @@ export function Hero() {
               rotation: () => angle(el) * 0.35 + (i % 2 ? 18 : -18),
               scaleX: 1.25,
               scaleY: 0.85,
+              // Fully shown when the pull starts, whatever the intro had reached
+              startAt: { opacity: 1 },
               filter: "blur(0px) brightness(1.25)",
               ...(isChar && { textShadow: WARM }),
               duration: 0.18,
@@ -190,7 +246,9 @@ export function Hero() {
               at + 0.33
             );
         });
-        tl.to({}, { duration: 0.12 });
+        // The headline is gone by JOURNEY.swallowed; the rest of the pin is the fall, the horizon
+        // and the wormhole, drawn by the scene from scrollStore.dive
+        tl.to({}, { duration: tl.duration() / JOURNEY.swallowed - tl.duration() });
       });
 
       return () => {
@@ -221,10 +279,10 @@ export function Hero() {
           </p>
 
           <h1 className="char-hover font-display text-[clamp(2.2rem,10.2vw,6rem)] font-extrabold uppercase leading-[0.88] tracking-[-0.045em] lg:text-[clamp(3rem,5.8vw,8.5rem)]">
-            <span className="hero-mask block overflow-hidden pb-[0.04em]">
+            <span className="hero-mask block pb-[0.04em]">
               <span className="hero-line block">Sites que</span>
             </span>
-            <span className="hero-mask flex items-end gap-[0.35em] overflow-hidden pb-[0.04em]">
+            <span className="hero-mask flex items-end gap-[0.35em] pb-[0.04em]">
               <span className="hero-line block text-transparent [-webkit-text-stroke:1.5px_var(--paper)]">ninguém</span>
               <span className="hero-fade label mb-[0.55em] hidden text-[11px] font-normal normal-case leading-snug tracking-[0.14em] text-muted xl:block">
                 design
@@ -234,7 +292,7 @@ export function Hero() {
                 <span className="text-lime">deploy</span>
               </span>
             </span>
-            <span className="hero-mask block overflow-hidden pb-[0.08em]">
+            <span className="hero-mask block pb-[0.08em]">
               <span className="hero-line block text-lime">esquece.</span>
             </span>
           </h1>
@@ -322,15 +380,19 @@ export function Hero() {
   );
 }
 
-/** Rotating "scroll to fall in" badge: a click plays the whole dive as one long, smooth scroll. */
+/**
+ * Rotating "scroll to fall in" badge: a click plays the whole trip as one long, smooth scroll,
+ * through the hole and out of the far side, landing on the band below the hero.
+ */
 function FallBadge() {
   const text = "Role para cair no buraco negro · ";
   return (
     <button
       onClick={() => {
-        const end = window.innerHeight * 1.4;
-        if (scrollStore.lenis) scrollStore.lenis.scrollTo(end, { duration: 3.4 });
-        else scrollToTarget(end);
+        const band = document.querySelector<HTMLElement>('[data-chapter="1"]');
+        if (!band) return;
+        if (scrollStore.lenis) scrollStore.lenis.scrollTo(band, { duration: 6.5, easing: (t) => -(Math.cos(Math.PI * t) - 1) / 2 });
+        else scrollToTarget('[data-chapter="1"]');
       }}
       aria-label="Rolar e cair no buraco negro"
       className="group relative grid size-20 shrink-0 place-items-center lg:size-24"

@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>DWdevs LinkedIn Banner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;700;800&display=block" rel="stylesheet">
+<style>
+  :root {
+    --green: #1fff7a;
+    --green-deep: #00c853;
+    --ink: #020403;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: var(--ink); overflow: hidden; }
+  body { font-family: "Montserrat", sans-serif; color: #fff; position: relative; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  .copy { position: absolute; top: 50%; transform: translateY(-50%); z-index: 2; }
+  .logo { font-weight: 800; letter-spacing: -0.045em; line-height: 0.9; white-space: nowrap; }
+  .logo .dw {
+    background: linear-gradient(180deg, #5bff9e 0%, #1fff7a 45%, #00c853 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 0 18px rgba(31, 255, 122, 0.35));
+  }
+  .tag { font-weight: 700; letter-spacing: -0.02em; line-height: 1.12; }
+  .tag em { font-style: normal; color: var(--green); }
+  .services { display: flex; align-items: center; font-weight: 500; color: rgba(255,255,255,0.78); white-space: nowrap; }
+  .services i { display: inline-block; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+
+  /* LinkedIn company page cover: 1128 x 191. Logo overlaps bottom-left, so copy starts after it. */
+  body.company .copy { left: 176px; display: flex; align-items: center; gap: 22px; }
+  body.company .logo { font-size: 60px; }
+  body.company .divider { width: 1px; height: 92px; background: linear-gradient(180deg, transparent, rgba(31,255,122,0.55), transparent); }
+  body.company .tag { font-size: 20px; }
+  body.company .services { font-size: 11.5px; gap: 10px; margin-top: 11px; }
+  body.company .services i { width: 4px; height: 4px; }
+
+  /* LinkedIn personal profile cover: 1584 x 396. Photo overlaps bottom-left. */
+  body.profile .copy { left: 400px; }
+  body.profile .logo { font-size: 118px; }
+  body.profile .tag { font-size: 36px; margin-top: 16px; }
+  body.profile .services { font-size: 18px; gap: 16px; margin-top: 22px; }
+  body.profile .services i { width: 6px; height: 6px; }
+  body.profile .divider { display: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="copy">
+  <div class="logo"><span class="dw">DW</span>devs</div>
+  <div class="divider"></div>
+  <div>
+    <div class="tag">Criamos sites rápidos, bonitos<br><em>e feitos sob medida.</em></div>
+    <div class="services">Sites institucionais <i></i> Landing pages <i></i> Sites 3D interativos</div>
+  </div>
+</div>
+<script>
+const params = new URLSearchParams(location.search);
+const mode = params.get("mode") === "profile" ? "profile" : "company";
+document.body.classList.add(mode);
+
+// Fixed LinkedIn dimensions; don't trust the viewport at script time in headless renders
+const [W, H] = mode === "company" ? [1128, 191] : [1584, 396];
+document.documentElement.style.width = document.body.style.width = W + "px";
+document.documentElement.style.height = document.body.style.height = H + "px";
+const dpr = Math.min(window.devicePixelRatio || 1, 3);
+const cv = document.getElementById("c");
+cv.width = W * dpr; cv.height = H * dpr;
+const ctx = cv.getContext("2d");
+ctx.scale(dpr, dpr);
+
+// Planet layout per format
+const P = mode === "company"
+  ? { x: 1002, y: 96, r: 56, grid: 22 }
+  : { x: 1330, y: 196, r: 118, grid: 34 };
+const TILT = -0.2;   // ring rotation (rad)
+const SQUASH = 0.24; // ring ellipse vertical ratio
+
+// Seeded random so every render is identical
+let seed = 7;
+const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+
+function layer() {
+  const c = document.createElement("canvas");
+  c.width = W * dpr; c.height = H * dpr;
+  const x = c.getContext("2d"); x.scale(dpr, dpr);
+  return [c, x];
+}
+function blit(c, filter = "none", op = "source-over", alpha = 1) {
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.filter = filter; ctx.globalCompositeOperation = op; ctx.globalAlpha = alpha;
+  ctx.drawImage(c, 0, 0);
+  ctx.restore();
+}
+
+// 1. Background: deep vignette + atmospheric glow behind the planet
+ctx.fillStyle = "#020403"; ctx.fillRect(0, 0, W, H);
+let g = ctx.createRadialGradient(P.x, P.y, 0, P.x, P.y, P.r * 5);
+g.addColorStop(0, "rgba(20, 120, 60, 0.30)");
+g.addColorStop(0.4, "rgba(10, 70, 35, 0.12)");
+g.addColorStop(1, "rgba(0, 0, 0, 0)");
+ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+// 2. Grid, masked to fade out away from the planet
+{
+  const [c, x] = layer();
+  x.strokeStyle = "rgba(60, 255, 140, 0.09)"; x.lineWidth = 1;
+  for (let gx = (P.x % P.grid); gx < W; gx += P.grid) { x.beginPath(); x.moveTo(gx + 0.5, 0); x.lineTo(gx + 0.5, H); x.stroke(); }
+  for (let gy = (P.y % P.grid); gy < H; gy += P.grid) { x.beginPath(); x.moveTo(0, gy + 0.5); x.lineTo(W, gy + 0.5); x.stroke(); }
+  x.globalCompositeOperation = "destination-in";
+  const m = x.createRadialGradient(P.x, P.y, P.r * 0.5, P.x, P.y, P.r * 5.2);
+  m.addColorStop(0, "rgba(0,0,0,1)"); m.addColorStop(1, "rgba(0,0,0,0)");
+  x.fillStyle = m; x.fillRect(0, 0, W, H);
+  blit(c);
+}
+
+// 3. Stars
+for (let i = 0; i < (mode === "company" ? 90 : 160); i++) {
+  const sx = rnd() * W, sy = rnd() * H, a = 0.08 + rnd() * 0.35;
+  ctx.fillStyle = rnd() > 0.7 ? `rgba(140,255,190,${a})` : `rgba(255,255,255,${a * 0.7})`;
+  ctx.fillRect(sx, sy, rnd() > 0.92 ? 1.4 : 0.8, rnd() > 0.92 ? 1.4 : 0.8);
+}
+
+// 4. Rings — drawn per-segment so brightness can vary around the orbit
+const bands = [];
+for (let i = 0; i < 26; i++) {
+  const k = 1.32 + i * 0.05 + (rnd() - 0.5) * 0.02;
+  if (i === 9 || i === 10 || i === 17) continue; // gaps (Cassini-style divisions)
+  bands.push({ k, w: 0.4 + rnd() * (i < 12 ? 1.8 : 1.1), a: 0.35 + rnd() * 0.65, hot: i < 8 });
+}
+// Outer swept orbit streaks, like the concept's long light trails
+const streaks = mode === "company" ? [] : [2.6, 2.8];
+
+function ringPoint(k, t) {
+  const rx = P.r * k, ry = P.r * k * SQUASH;
+  const ex = Math.cos(t) * rx, ey = Math.sin(t) * ry;
+  return [P.x + ex * Math.cos(TILT) - ey * Math.sin(TILT), P.y + ex * Math.sin(TILT) + ey * Math.cos(TILT)];
+}
+function brightness(t) {
+  // Brightest on the left-front limb, dimmer in the back
+  const front = Math.sin(t) > 0 ? 1 : 0.55;
+  const limb = 0.35 + 0.65 * Math.pow(Math.max(0, -Math.cos(t - 0.35)), 1.6);
+  return front * limb + 0.12;
+}
+function drawRings(x, front) {
+  const steps = 420;
+  x.lineCap = "round";
+  for (const b of bands) {
+    for (let s = 0; s < steps; s++) {
+      const t0 = (s / steps) * Math.PI * 2, t1 = ((s + 1.15) / steps) * Math.PI * 2;
+      if ((Math.sin((t0 + t1) / 2) > 0) !== front) continue;
+      const a = b.a * brightness(t0);
+      const [x0, y0] = ringPoint(b.k, t0), [x1, y1] = ringPoint(b.k, t1);
+      x.strokeStyle = b.hot ? `rgba(190, 255, 120, ${a})` : `rgba(31, 255, 122, ${a * 0.85})`;
+      x.lineWidth = b.w * (P.r / 66);
+      x.beginPath(); x.moveTo(x0, y0); x.lineTo(x1, y1); x.stroke();
+    }
+  }
+  for (const k of streaks) {
+    for (let s = 0; s < steps; s++) {
+      const t0 = (s / steps) * Math.PI * 2, t1 = ((s + 1.15) / steps) * Math.PI * 2;
+      if ((Math.sin((t0 + t1) / 2) > 0) !== front) continue;
+      // Streaks fade to nothing except along the left sweep
+      const a = Math.pow(Math.max(0, -Math.cos(t0 - 0.5)), 3) * 0.55;
+      if (a < 0.01) continue;
+      const [x0, y0] = ringPoint(k, t0), [x1, y1] = ringPoint(k, t1);
+      x.strokeStyle = `rgba(31, 255, 122, ${a})`;
+      x.lineWidth = 0.7 * (P.r / 66);
+      x.beginPath(); x.moveTo(x0, y0); x.lineTo(x1, y1); x.stroke();
+    }
+  }
+}
+const [back, bx] = layer(); drawRings(bx, false);
+const [front, fx] = layer(); drawRings(fx, true);
+const bloom = mode === "company" ? 6 : 12;
+
+blit(back, `blur(${bloom * 2}px)`, "lighter", 0.9);
+blit(back, `blur(${bloom * 0.6}px)`, "lighter", 0.8);
+blit(back, "none", "lighter", 1);
+
+// 5. Planet: black body with a green rim light (crescent on the lower-right)
+{
+  const halo = ctx.createRadialGradient(P.x, P.y, P.r * 0.9, P.x, P.y, P.r * 1.6);
+  halo.addColorStop(0, "rgba(31,255,122,0.45)");
+  halo.addColorStop(0.25, "rgba(31,255,122,0.12)");
+  halo.addColorStop(1, "rgba(31,255,122,0)");
+  ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(P.x, P.y, P.r * 1.6, 0, Math.PI * 2); ctx.fill();
+
+  ctx.save();
+  ctx.beginPath(); ctx.arc(P.x, P.y, P.r, 0, Math.PI * 2); ctx.clip();
+  ctx.fillStyle = "#010201"; ctx.fillRect(P.x - P.r, P.y - P.r, P.r * 2, P.r * 2);
+  // Crescent: green disc minus an offset black disc, softened
+  const [c, x] = layer();
+  x.fillStyle = "#3dff8f"; x.beginPath(); x.arc(P.x, P.y, P.r, 0, Math.PI * 2); x.fill();
+  x.globalCompositeOperation = "destination-out";
+  x.filter = `blur(${P.r * 0.09}px)`;
+  x.beginPath(); x.arc(P.x - P.r * 0.07, P.y - P.r * 0.1, P.r * 0.97, 0, Math.PI * 2); x.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.beginPath(); ctx.arc(P.x, P.y, P.r, 0, Math.PI * 2); ctx.clip();
+  blit(c, "none", "lighter", 0.95);
+  ctx.restore();
+  // Thin full rim
+  ctx.strokeStyle = "rgba(31,255,122,0.55)"; ctx.lineWidth = 1 * (P.r / 66);
+  ctx.beginPath(); ctx.arc(P.x, P.y, P.r - 0.5, 0, Math.PI * 2); ctx.stroke();
+}
+
+blit(front, `blur(${bloom * 2}px)`, "lighter", 0.9);
+blit(front, `blur(${bloom * 0.6}px)`, "lighter", 0.8);
+blit(front, "none", "lighter", 1);
+
+// 6. Left-side darkening so the copy always sits on near-black (legibility first)
+g = ctx.createLinearGradient(0, 0, W, 0);
+const fadeEnd = mode === "company" ? 0.6 : 0.62;
+g.addColorStop(0, "rgba(2,4,3,0.95)");
+g.addColorStop(fadeEnd * 0.85, "rgba(2,4,3,0.9)");
+g.addColorStop(fadeEnd, "rgba(2,4,3,0)");
+ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+// 7. Film grain (~2.5%) to kill gradient banding
+{
+  const [c, x] = layer();
+  const img = x.createImageData(c.width, c.height);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = rnd() * 255;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255;
+  }
+  x.putImageData(img, 0, 0);
+  blit(c, "none", "overlay", 0.05);
+}
+</script>
+</body>
+</html>

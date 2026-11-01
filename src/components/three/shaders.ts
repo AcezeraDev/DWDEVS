@@ -564,12 +564,14 @@ uniform float uTime;
 uniform float uOpen;
 uniform float uRadius;
 uniform float uAspect;
+uniform vec2 uCenter;
 uniform vec3 uTint;
 uniform vec3 uTint2;
 varying vec2 vUv;
 ${noise3D}
 void main(){
-  vec2 p = (vUv - 0.5) * vec2(uAspect, 1.0);
+  // Opens around the black hole (beside the copy), not in the middle of the screen
+  vec2 p = (vUv - uCenter) * vec2(uAspect, 1.0);
   float r = length(p) + 1e-4;
   float a = atan(p.y, p.x);
   float R = max(uRadius, 1e-3);
@@ -582,12 +584,84 @@ void main(){
   float inside = smoothstep(R, R * 0.15, r);
   float arms = pow(0.5 + 0.5 * sin(a * 4.0 + log(r) * 8.0 - uTime * 2.2), 5.0) * inside * smoothstep(0.0, R * 0.5, r);
   float streak = pow(max(0.0, snoise(vec3(a * 10.0, r * 2.0 - uTime * 2.4, 3.0))), 5.0) * inside;
-  vec3 col = uTint * rim * 1.05
-    + mix(uTint, vec3(1.0), 0.45) * rim * rim * 0.5
-    + uTint2 * flame * 0.7
-    + mix(uTint, uTint2, 0.5) * arms * 0.3
-    + mix(uTint, vec3(1.0), 0.6) * streak * 0.45
-    + uTint * exp(-max(r - R, 0.0) * 7.0) * 0.12 * step(r, R * 1.8);
+  // The rim thins out as it grows, so once it sweeps across the copy it is a hairline, not a glare
+  float thin = 1.0 - smoothstep(0.5, 1.6, R) * 0.65;
+  vec3 col = uTint * rim * 0.9 * thin
+    + mix(uTint, vec3(1.0), 0.45) * rim * rim * 0.4 * thin
+    + uTint2 * flame * 0.5 * thin
+    + mix(uTint, uTint2, 0.5) * arms * 0.14
+    + mix(uTint, vec3(1.0), 0.6) * streak * 0.18
+    + uTint * exp(-max(r - R, 0.0) * 7.0) * 0.08 * step(r, R * 1.8);
   gl_FragColor = vec4(col * uOpen, 1.0);
+}
+`;
+
+// Wormhole: the full-screen layer for the inside of the black hole, drawn over the scene.
+// uCross: the shadow swallows the screen from the hole outward, its photon ring sweeping past the
+// edges. uTunnel: inside, lensed starlight streams past in a twisting tube toward a pinpoint of
+// light. uExit: that light opens into a white hole whose rim races outward; inside the rim the
+// scene on the far side (the galaxy) shows through. Premultiplied alpha, so the rims only add light.
+export const wormholeFragment = /* glsl */ `
+uniform float uTime;
+uniform float uAspect;
+uniform vec2 uHole;
+uniform float uHoleR;
+uniform float uCross;
+uniform float uTunnel;
+uniform float uExit;
+uniform float uFlow;
+varying vec2 vUv;
+${noise3D}
+void main(){
+  vec3 lime = vec3(0.784, 0.941, 0.192);
+  vec3 teal = vec3(0.12, 0.82, 0.73);
+  vec3 violet = vec3(0.42, 0.24, 0.9);
+  vec3 cream = vec3(1.0, 0.98, 0.9);
+
+  // Falling in, the middle of the view slides from the hole to the centre of the screen
+  vec2 c = mix(uHole, vec2(0.5), smoothstep(0.0, 1.0, uCross));
+  vec2 p = (vUv - c) * vec2(uAspect, 1.0);
+  float r = length(p) + 1e-4;
+  float a = atan(p.y, p.x);
+
+  // Horizon: a black disc that grows from the hole's shadow until it covers the screen
+  float R = mix(uHoleR, 1.25 * max(uAspect, 1.0), pow(uCross, 1.8));
+  float disc = smoothstep(R * 1.015, R * 0.985, r);
+  float rw = 0.006 + R * 0.04;
+  float ring = exp(-pow((r - R) / rw, 2.0)) * (1.0 - smoothstep(0.75, 1.0, uCross)) * step(0.001, uCross);
+  float ringN = 0.7 + 0.3 * snoise(vec3(cos(a) * 3.0, sin(a) * 3.0, uTime * 1.5));
+
+  // Inside: depth runs as 1/r, so the walls stream outward past the camera as uFlow grows
+  float z = 0.32 / max(r, 0.015);
+  float zz = z + uFlow;
+  float tw = a + z * 0.55 + uTime * 0.15;
+  vec3 q = vec3(cos(tw) * 4.0, sin(tw) * 4.0, zz * 1.2);
+  float streak = pow(max(snoise(q), 0.0), 3.5);
+  float gas = smoothstep(-0.3, 0.9, snoise(vec3(cos(tw) * 1.6, sin(tw) * 1.6, zz * 0.35 + 7.0)));
+  // Rings of lensed starlight (copies of the sky the hole swallowed) rushing past
+  float rings = pow(0.5 + 0.5 * sin(zz * 7.0 + snoise(vec3(cos(a), sin(a), zz * 0.2)) * 1.5), 22.0);
+  float near = smoothstep(0.0, 0.35, r);
+  vec3 wall = mix(teal, violet, 0.5 + 0.5 * sin(zz * 0.45));
+  vec3 inside = vec3(0.004, 0.006, 0.01)
+    + wall * gas * 0.22 * near
+    + mix(lime, cream, 0.4) * streak * (0.35 + near * 0.9)
+    + mix(lime, cream, 0.6) * rings * 0.5 * near;
+  // The far end: a pinpoint of light that grows into the white hole
+  float E = mix(0.012, 1.3 * max(uAspect, 1.0), pow(uExit, 1.7));
+  // The halo hugs the light while it is far away and fades as it opens, so only the rim burns
+  float glow = exp(-max(r - E, 0.0) / (0.025 + E * 0.05));
+  inside *= smoothstep(0.0, 0.25, uTunnel);
+  inside += mix(cream, lime, 0.25) * glow * (0.35 + uTunnel * 0.9) * (1.0 - smoothstep(0.0, 0.35, uExit) * 0.85);
+
+  // Exit: inside the white hole's rim the scene beyond shows through; the rim itself burns
+  // Until the exit starts the far end is only light: no window onto the scene behind it yet
+  float Eo = E * smoothstep(0.0, 0.06, uExit);
+  float open = smoothstep(Eo * 0.94, Eo * 1.01 + 1e-4, r);
+  float rim = exp(-pow((r - E) / (0.008 + E * 0.05), 2.0)) * smoothstep(0.0, 0.08, uExit);
+  float alpha = disc * open;
+  vec3 col = inside * alpha;
+  col += mix(lime, cream, 0.5) * ring * ringN * 1.6;
+  col += mix(cream, lime, 0.3) * rim * 0.95 * (1.0 - smoothstep(0.85, 1.0, uExit));
+  gl_FragColor = vec4(col, alpha);
 }
 `;

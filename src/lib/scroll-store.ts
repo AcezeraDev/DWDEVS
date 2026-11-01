@@ -7,8 +7,11 @@ export const scrollStore = {
   ready: false,
   // 1 → scene still scattered / camera far, 0 → assembled (tweened after the preloader)
   intro: 1,
-  // 0..1 while the hero is pinned: the headline gets swallowed and the camera falls into the hole
+  // 0..1 while the hero is pinned: the headline gets swallowed, the camera falls into the hole,
+  // crosses the horizon and rides the wormhole inside it (see JOURNEY for the phases)
   dive: 0,
+  // 0..1 while the process section scrolls in: the hole tucks into the corner, away from the copy
+  tuck: 0,
   // Which chapter of the page is on screen (see [data-chapter]); drives the rail and the CTA
   chapter: 0,
   // How far each chapter has scrolled in (0..1 per [data-chapter] n). Their sum is the scene's
@@ -24,6 +27,13 @@ export const scrollStore = {
     warp: 0,
     // 0..1 peaking as the camera flies through a section portal
     portal: 0,
+    // The fall through the hole, smoothed (all 0..1): falling in (back to 0 once out), crossing the
+    // horizon (the shadow swallows the screen; stays 1 on the far side), riding the wormhole, and
+    // coming out of the white hole on the far side
+    fall: 0,
+    cross: 0,
+    tunnel: 0,
+    exit: 0,
     hole: { x: 0, y: 0, r: 0 },
     planets: [0, 1, 2, 3].map(() => ({ x: 0, y: 0, o: 0, active: 0 })),
   },
@@ -37,6 +47,17 @@ export const JET_POINT = { x: 0.82, y: 0.58 };
 
 /** Where the black hole sits on screen (NDC) at the bottom of the hero dive. */
 export const DIVE_POINT = { x: 0, y: 0.1 };
+
+/**
+ * The hero dive, as fractions of scrollStore.dive: the headline is gone by `swallowed`, the camera
+ * has fallen all the way in by `fallen`, the horizon crossing runs `crossFrom`..`crossTo` and the
+ * wormhole starts at `tunnelFrom`. Coming out of it is driven by the band below the hero (legs[1]),
+ * which is fully out at `exitBy` of its zone.
+ */
+export const JOURNEY = { swallowed: 0.4, fallen: 0.62, crossFrom: 0.5, crossTo: 0.7, tunnelFrom: 0.56, exitBy: 0.6 };
+
+/** How many screen heights the hero stays pinned for the whole dive. */
+export const DIVE_LENGTH = 2.8;
 
 export function scrollToTarget(target: string | number) {
   if (scrollStore.lenis) {

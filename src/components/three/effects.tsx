@@ -61,15 +61,18 @@ export function Effects() {
   useFrame((_, delta) => {
     const ratio = gl.getPixelRatio();
     if (fx.composer.renderer.getPixelRatio() !== ratio) fx.composer.setPixelRatio(ratio);
-    const { charge, speed, crossing, hole } = scrollStore.fx;
-    const dive = scrollStore.dive * (1 - scrollStore.legs[1]);
-    fx.bloom.strength = (small ? 0.2 : 0.25) + charge * 0.25 + crossing * 0.4 + speed * 0.1 - dive * 0.15;
-    fx.bloom.radius = 0.35 + charge * 0.15;
+    const { charge, speed, crossing, hole, fall, cross, tunnel, exit } = scrollStore.fx;
+    // Inside the wormhole (between crossing and the exit rim racing off-screen)
+    const inside = cross * (1 - Math.min(exit * 2.5, 1));
+    const rim = Math.sin(Math.PI * Math.min(exit * 1.15, 1));
+    fx.bloom.strength = (small ? 0.2 : 0.25) + charge * 0.25 + crossing * 0.4 + speed * 0.1 - fall * (1 - cross) * 0.15 + inside * 0.25 + rim * 0.12;
+    fx.bloom.radius = 0.35 + charge * 0.15 + inside * 0.2;
     const u = fx.lens.uniforms;
-    u.uCenter.value.set(hole.x / size.width, 1 - hole.y / size.height);
-    u.uZoom.value = THREE.MathUtils.damp(u.uZoom.value, charge * 0.1 + dive * 0.1 + speed * 0.05, 8, delta);
+    // Inside, everything smears toward the middle of the screen (the far end of the tunnel)
+    u.uCenter.value.set(THREE.MathUtils.lerp(hole.x / size.width, 0.5, cross), THREE.MathUtils.lerp(1 - hole.y / size.height, 0.5, cross));
+    u.uZoom.value = THREE.MathUtils.damp(u.uZoom.value, charge * 0.1 + fall * (1 - cross) * 0.1 + speed * 0.05 + inside * (0.06 + tunnel * 0.08), 8, delta);
     // No fringes at rest (they make every particle look doubled); they only open up while it pulls
-    u.uAberr.value = charge * 0.012 + speed * 0.003;
+    u.uAberr.value = charge * 0.012 + speed * 0.003 + inside * 0.01 + rim * 0.008;
     fx.composer.render(delta);
   }, 1);
 

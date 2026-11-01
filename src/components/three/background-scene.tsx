@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { AdaptiveDpr } from "@react-three/drei";
 import * as THREE from "three";
-import { DIVE_POINT, JET_POINT, scrollStore } from "@/lib/scroll-store";
+import { DIVE_POINT, JET_POINT, JOURNEY, scrollStore } from "@/lib/scroll-store";
 import { Effects } from "./effects";
 import {
   bgFragment,
@@ -16,6 +16,7 @@ import {
   planetFragment,
   planetVertex,
   portalFragment,
+  wormholeFragment,
 } from "./shaders";
 
 /** One colour per service planet, in the order of the Services section. */
@@ -61,6 +62,9 @@ const CHAPTER_LOOK = [
 ];
 
 const isBig = (h: HoleKey | null) => !!h && h.s > 2;
+
+/** Where the hole waits while the process section (text in both columns) is on screen. */
+const TUCK_KEY: HoleKey = { x: 0.92, y: -0.68, s: 0.62, tilt: 0.7, roll: 0.45, o: 0.85 };
 
 function sampleChapter<T extends Record<string, number>>(table: T[], c: number, out: T) {
   const i = Math.min(Math.floor(c), table.length - 2);
@@ -179,6 +183,7 @@ function Portal() {
       uOpen: { value: 0 },
       uRadius: { value: 0 },
       uAspect: { value: 1 },
+      uCenter: { value: holeScreen.uv },
       uTint: { value: new THREE.Color(PORTALS[2][0]) },
       uTint2: { value: new THREE.Color(PORTALS[2][1]) },
     }),
@@ -225,6 +230,65 @@ function Portal() {
   );
 }
 
+/**
+ * The inside of the black hole, over everything else: the shadow swallows the screen, the camera
+ * rides a wormhole of lensed starlight, then comes out of a white hole into the galaxy.
+ * Journey writes the phases (scrollStore.fx) before this runs each frame.
+ */
+function Wormhole() {
+  const mat = useRef<THREE.ShaderMaterial>(null);
+  const mesh = useRef<THREE.Mesh>(null);
+  const size = useThree((s) => s.size);
+  const flow = useRef(0);
+  const uniforms = useMemo(
+    () => ({
+      uTime: { value: 0 },
+      uAspect: { value: 1 },
+      uHole: { value: holeScreen.uv },
+      uHoleR: { value: 0 },
+      uCross: { value: 0 },
+      uTunnel: { value: 0 },
+      uExit: { value: 0 },
+      uFlow: { value: 0 },
+    }),
+    []
+  );
+
+  useFrame((_, delta) => {
+    const m = mat.current;
+    if (!m || !mesh.current) return;
+    const dt = Math.min(delta, 0.05);
+    const { cross, tunnel, exit, speed } = scrollStore.fx;
+    // The walls stream past faster the deeper you go and the faster you scroll
+    flow.current += dt * (0.25 + tunnel * 1.4 + speed * 2.5) * (1 - exit * 0.6);
+    const u = m.uniforms;
+    u.uTime.value += dt;
+    u.uAspect.value = size.width / size.height;
+    u.uHoleR.value = holeScreen.r;
+    u.uCross.value = cross;
+    u.uTunnel.value = tunnel;
+    u.uExit.value = exit;
+    u.uFlow.value = flow.current;
+    mesh.current.visible = cross > 0.001 && exit < 0.999;
+  });
+
+  return (
+    <mesh ref={mesh} frustumCulled={false} renderOrder={5} visible={false}>
+      <planeGeometry args={[2, 2]} />
+      <shaderMaterial
+        ref={mat}
+        vertexShader={bgVertex}
+        fragmentShader={wormholeFragment}
+        uniforms={uniforms}
+        transparent
+        premultipliedAlpha
+        depthWrite={false}
+        depthTest={false}
+      />
+    </mesh>
+  );
+}
+
 /** The particle field, the black hole and the camera, all driven by the chapter on screen. */
 function Journey() {
   const mat = useRef<THREE.ShaderMaterial>(null);
@@ -234,6 +298,7 @@ function Journey() {
   const count = small ? 16000 : 38000;
   const chapter = useRef(0);
   const dive = useRef(0);
+  const exitP = useRef(0);
   const flow = useRef(0);
   const pulse = useRef(0);
   const wave = useRef(0);
@@ -350,14 +415,28 @@ function Journey() {
     const target = scrollStore.chapter;
     const legs = scrollStore.legs;
 
-    // Everything follows the scroll: the chapter is the sum of how far each section has come in,
-    // and the dive unwinds as the band after the hero scrolls in (we climb back out of the hole).
+    // Everything follows the scroll: the chapter is the sum of how far each section has come in.
+    // The dive is a one-way trip: fall in, cross the horizon, ride the wormhole (all while the hero
+    // is pinned), then come out of a white hole on the far side as the band below scrolls in.
     // The damping only smooths the steps between frames.
     const goal = legs[1] + legs[2] + legs[3] + legs[4];
     chapter.current = THREE.MathUtils.damp(chapter.current, goal, 5, dt);
-    dive.current = THREE.MathUtils.damp(dive.current, scrollStore.dive * (1 - legs[1]), 7, dt);
+    dive.current = THREE.MathUtils.damp(dive.current, scrollStore.dive, 7, dt);
+    exitP.current = THREE.MathUtils.damp(exitP.current, clamp01(legs[1] / JOURNEY.exitBy), 7, dt);
     const c = chapter.current;
-    const dv = dive.current;
+    const d = dive.current;
+    const exit = exitP.current;
+    const fall = clamp01(d / JOURNEY.fallen);
+    const cross = smooth(clamp01((d - JOURNEY.crossFrom) / (JOURNEY.crossTo - JOURNEY.crossFrom)));
+    const tunnel = clamp01((d - JOURNEY.tunnelFrom) / (1 - JOURNEY.tunnelFrom));
+    // The hole and the particles snap back to the galaxy early in the exit, hidden by the wormhole,
+    // so what shows through the white hole is already the far side
+    const dv = fall * (1 - smooth(clamp01(exit / 0.35)));
+    const hideHole = cross * (1 - smooth(clamp01((exit - 0.3) / 0.5)));
+    scrollStore.fx.fall = fall * (1 - exit);
+    scrollStore.fx.cross = cross;
+    scrollStore.fx.tunnel = tunnel;
+    scrollStore.fx.exit = cross > 0.001 ? exit : 0;
     // How much of the hero framing is left (1 on the hero, 0 once the galaxy has formed)
     const heroW = 1 - smooth(clamp01(c));
     // Each new chapter sends a gravitational wave across the grid and the particles
@@ -367,8 +446,8 @@ function Journey() {
     }
     wave.current = THREE.MathUtils.damp(wave.current, 0, 1.4, dt);
     // Crossing the horizon: the camera shakes hardest right before it falls through
-    const crossing = Math.exp(-Math.pow((dv - 0.93) / 0.06, 2));
-    const quake = Math.exp(-Math.pow((dv - 0.82) / 0.14, 2)) * 0.22;
+    const crossing = Math.exp(-Math.pow((d - JOURNEY.crossFrom - 0.06) / 0.06, 2)) * (1 - exit);
+    const quake = Math.exp(-Math.pow((fall - 0.85) / 0.14, 2)) * 0.22 * (1 - exit);
     const tNow = state.clock.elapsedTime;
     sampleChapter(CHAPTER_LOOK, c, lookNow);
     // Held click charges slowly and lets go fast; the services orbit fades in while pinned
@@ -453,16 +532,17 @@ function Journey() {
       const h0 = CHAPTER_HOLE[0];
       const stacked = size.width < 1024;
       const square = !stacked && u.uAspect.value < 1.5;
-      const hx = stacked ? 0 : square ? 0.6 : h0.x;
-      const hy = stacked ? (narrow ? 0.64 : 0.5) : h0.y;
-      const hs = stacked ? (narrow ? 1.2 : 1.1) : square ? h0.s * 0.78 : h0.s;
+      // Landscape tablets: the headline fills the left, so the hole sits top-right, smaller
+      const hx = stacked ? (narrow ? 0 : 0.6) : square ? 0.6 : h0.x;
+      const hy = stacked ? (narrow ? 0.64 : 0.46) : h0.y;
+      const hs = stacked ? (narrow ? 1.2 : 0.78) : square ? h0.s * 0.78 : h0.s;
       holeTarget.x += (hx - h0.x) * heroW;
       holeTarget.y += (hy - h0.y) * heroW;
       holeTarget.s += (hs - h0.s) * heroW;
     }
     if (dv > 0.001) {
-      // Falling in, it reaches the middle early; climbing out, it drifts back with the scroll.
-      const a = legs[1] > 0 ? smooth(dv) : smooth(clamp01(dv / 0.2));
+      // Falling in, it reaches the middle early; on the way out it snaps back behind the wormhole.
+      const a = exit > 0 ? smooth(dv) : smooth(clamp01(dv / 0.2));
       const b = smooth(clamp01((dv - 0.25) / 0.75));
       holeTarget.x = THREE.MathUtils.lerp(holeTarget.x, DIVE_POINT.x, a);
       holeTarget.y = THREE.MathUtils.lerp(holeTarget.y, DIVE_POINT.y, a);
@@ -487,6 +567,12 @@ function Journey() {
       const orbitKey: HoleKey = { x: u.uAspect.value < 1.5 ? 0.5 : 0.42, y: -0.04, s: 1.3, tilt: 0.95, roll: 0.15, o: 1 };
       for (const k of ["x", "y", "s", "tilt", "roll", "o"] as const) holeTarget[k] = THREE.MathUtils.lerp(holeTarget[k], orbitKey[k], ow);
     }
+    // Process section: the copy fills both columns, so the hole tucks into the bottom-right corner
+    // until the contact chapter calls it to the button
+    const tuck = smooth(clamp01(scrollStore.tuck)) * (1 - smooth(clamp01(legs[4] * 1.4)));
+    if (tuck > 0.001 && !atCta && dv < 0.01) {
+      for (const k of ["x", "y", "s", "tilt", "roll", "o"] as const) holeTarget[k] = THREE.MathUtils.lerp(holeTarget[k], TUCK_KEY[k], tuck);
+    }
     if (!holeNow.current) holeNow.current = { ...holeTarget };
     const hn = holeNow.current;
     const follow = atCta ? 14 : dv > 0.01 || isBig(holeNow.current) ? 9 : 5;
@@ -495,7 +581,7 @@ function Journey() {
     const swell = pulse.current * (1 - pulse.current) * 4;
     const shrink = narrow && !atCta ? THREE.MathUtils.lerp(0.6, 1, heroW) : 1;
     const mass = hn.s * (1 + swell * 0.3 + hunger.current * 0.12 + ch * 0.35 + hoverW.current * 0.1) * shrink;
-    const amt = (1 - scrollStore.intro) * hn.o;
+    const amt = (1 - scrollStore.intro) * hn.o * (1 - hideHole);
 
     // Phones: text fills the width, so outside the dive and the button the hole hugs the edge.
     const edge = (hn.x >= 0 ? 1 : -1) * Math.max(Math.abs(hn.x), 0.8) * 1.08;
@@ -658,6 +744,7 @@ export default function BackgroundScene() {
         <Background />
         <Journey />
         <Portal />
+        <Wormhole />
         <Effects />
       </Canvas>
     </div>
